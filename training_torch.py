@@ -38,7 +38,8 @@ def main(args):
     random.seed(int(args.seed))
     torch.manual_seed(int(args.seed))
 
-    wandb.init(project="brax-cshl")
+    config = vars(args)
+    wandb.init(project="brax-cshl", config=config)
     # Here is a PPO Agent written in PyTorch:
 
     # In[2]:
@@ -321,6 +322,7 @@ def main(args):
             env.action_space.shape[-1] * 2,
         ]
         value_layers = [env.observation_space.shape[-1], 64, 64, 1]
+
         agent = Agent(
             policy_layers,
             value_layers,
@@ -329,7 +331,7 @@ def main(args):
             reward_scaling,
             device,
         )
-        agent = torch.jit.script(agent.to(device))
+        agent = agent.to(device)
         optimizer = optim.Adam(agent.parameters(), lr=learning_rate)
 
         sps = 0
@@ -424,7 +426,6 @@ def main(args):
         ydata.append(metrics["eval/episode_reward"].cpu())
         eval_sps.append(metrics["speed/eval_sps"])
         train_sps.append(metrics["speed/sps"])
-        clear_output(wait=True)
 
         wandb.log(
             {
@@ -449,8 +450,8 @@ def main(args):
 
     ppo.train(
         environment=envs.create(env_name="ant", backend="spring"),
-        num_timesteps=30_000_000,
-        num_evals=10,
+        num_timesteps=50_000_000,
+        num_evals=100,
         reward_scaling=0.1,
         episode_length=1000,
         normalize_observations=True,
@@ -459,10 +460,10 @@ def main(args):
         num_minibatches=32,
         num_updates_per_batch=4,
         discounting=0.97,
-        learning_rate=3e-4,
-        entropy_cost=1e-2,
-        num_envs=2048,
-        batch_size=1024,
+        learning_rate=args.learning_rate,
+        entropy_cost=args.entropy_cost,
+        num_envs=args.number_envs,
+        batch_size=args.batch_size,
         progress_fn=progress,
     )
 
@@ -474,5 +475,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", default=0)
+    parser.add_argument("--learning_rate", default=3e-4)
+    parser.add_argument("--entropy_cost", default=1e-2)
+    parser.add_argument("--number_envs", default=2048)
+    parser.add_argument("--batch_size", default=1024)
     args = parser.parse_args()
     main(args)
