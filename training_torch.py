@@ -1,5 +1,49 @@
 # from utils import *
 from Custom_layers import BayesianLinear
+from typing import List
+
+
+def calculate_parameters(mlp):
+    # The number of parameters between two layers is the product of the
+    # number of neurons in these two layers, plus the number of neurons
+    # in the current layer (for bias terms).
+    # There are no parameters for the first layer, so we start from the second layer.
+    return sum([mlp[i - 1] * mlp[i] + mlp[i] for i in range(1, len(mlp))])
+
+
+def calculate_compression_ratio(
+    env,
+    vanilla_policy_layers: List[int],
+    vanilla_value_layers: List[int],
+    number_of_cell_types: int,
+) -> float:
+    number_of_vanilla_policy_parameters = calculate_parameters(vanilla_policy_layers)
+    number_of_vanilla_value_parameters = calculate_parameters(vanilla_value_layers)
+    total_vanilla_parameters = (
+        number_of_vanilla_policy_parameters + number_of_vanilla_value_parameters
+    )
+    compressed_policy_layers = [
+        env.observation_space.shape[-1],
+        number_of_cell_types,
+        number_of_cell_types,
+        1,
+    ]
+    compressed_value_layers = [
+        env.observation_space.shape[-1],
+        number_of_cell_types,
+        number_of_cell_types,
+        1,
+    ]
+    number_of_compressed_policy_parameters = calculate_parameters(
+        compressed_policy_layers
+    )
+    number_of_compressed_value_parameters = calculate_parameters(
+        compressed_value_layers
+    )
+    total_compressed_parameters = (
+        number_of_compressed_policy_parameters + number_of_compressed_value_parameters
+    )
+    return total_vanilla_parameters / total_compressed_parameters
 
 
 def main(args):
@@ -39,7 +83,6 @@ def main(args):
     torch.manual_seed(int(args.seed))
 
     config = vars(args)
-    wandb.init(project="brax-cshl", config=config)
     # Here is a PPO Agent written in PyTorch:
 
     # In[2]:
@@ -49,6 +92,7 @@ def main(args):
 
         def __init__(
             self,
+            number_of_cell_types: int,
             policy_layers: Sequence[int],
             value_layers: Sequence[int],
             entropy_cost: float,
@@ -64,8 +108,8 @@ def main(args):
                     BayesianLinear(
                         in_features=w1,
                         out_features=w2,
-                        neuron_types_in=5,
-                        neuron_types_out=5,
+                        neuron_types_in=number_of_cell_types,
+                        neuron_types_out=number_of_cell_types,
                     )
                 )
                 policy.append(nn.SiLU())
@@ -78,8 +122,8 @@ def main(args):
                     BayesianLinear(
                         in_features=w1,
                         out_features=w2,
-                        neuron_types_in=5,
-                        neuron_types_out=5,
+                        neuron_types_in=number_of_cell_types,
+                        neuron_types_out=number_of_cell_types,
                     )
                 )
                 value.append(nn.SiLU())
@@ -282,6 +326,7 @@ def main(args):
 
     def train(
         seed,
+        number_of_cell_types: int,
         env_name: str = "ant",
         num_envs: int = 2048,
         episode_length: int = 1000,
@@ -315,17 +360,26 @@ def main(args):
         env.step(action)
 
         # create the agent
-        policy_layers = [
+        vanilla_policy_layers = [
             env.observation_space.shape[-1],
             64,
             64,
             env.action_space.shape[-1] * 2,
         ]
-        value_layers = [env.observation_space.shape[-1], 64, 64, 1]
+        vanilla_value_layers = [env.observation_space.shape[-1], 64, 64, 1]
+        compression_ratio = calculate_compression_ratio(
+            env,
+            vanilla_policy_layers,
+            vanilla_value_layers,
+            number_of_cell_types=number_of_cell_types,
+        )
+        config["compression_ratio"] = compression_ratio
 
+        wandb.init(project="brax-cshl", config=config)
         agent = Agent(
-            policy_layers,
-            value_layers,
+            number_of_cell_types,
+            vanilla_policy_layers,
+            vanilla_value_layers,
             entropy_cost,
             discounting,
             reward_scaling,
@@ -435,39 +489,47 @@ def main(args):
             },
         )
 
-    train(progress_fn=progress, seed=int(args.seed))
+    train(
+        number_of_cell_types=args.number_of_cell_types,
+        progress_fn=progress,
+        seed=int(args.seed),
+        num_envs=int(args.number_envs),
+        batch_size=int(args.batch_size),
+        learning_rate=float(args.learning_rate),
+        entropy_cost=float(args.entropy_cost),
+    )
 
     print(f"time to jit: {times[1] - times[0]}")
     print(f"time to train: {times[-1] - times[1]}")
     print(f"eval steps/sec: {np.mean(eval_sps)}")
     print(f"train steps/sec: {np.mean(train_sps)}")
 
-    train_sps = []
+    # train_sps = []
 
-    def progress(_, metrics):
-        if "training/sps" in metrics:
-            train_sps.append(metrics["training/sps"])
+    # def progress(_, metrics):
+    #     if "training/sps" in metrics:
+    #         train_sps.append(metrics["training/sps"])
 
-    ppo.train(
-        environment=envs.create(env_name="ant", backend="spring"),
-        num_timesteps=50_000_000,
-        num_evals=100,
-        reward_scaling=0.1,
-        episode_length=1000,
-        normalize_observations=True,
-        action_repeat=1,
-        unroll_length=5,
-        num_minibatches=32,
-        num_updates_per_batch=4,
-        discounting=0.97,
-        learning_rate=args.learning_rate,
-        entropy_cost=args.entropy_cost,
-        num_envs=args.number_envs,
-        batch_size=args.batch_size,
-        progress_fn=progress,
-    )
+    # ppo.train(
+    #     environment=envs.create(env_name="ant", backend="spring"),
+    #     num_timesteps=50_000_000,
+    #     num_evals=100,
+    #     reward_scaling=0.1,
+    #     episode_length=1000,
+    #     normalize_observations=True,
+    #     action_repeat=1,
+    #     unroll_length=5,
+    #     num_minibatches=32,
+    #     num_updates_per_batch=4,
+    #     discounting=0.97,
+    #     learning_rate=args.learning_rate,
+    #     entropy_cost=args.entropy_cost,
+    #     num_envs=args.number_envs,
+    #     batch_size=args.batch_size,
+    #     progress_fn=progress,
+    # )
 
-    print(f"train steps/sec: {np.mean(train_sps[1:])}")
+    # print(f"train steps/sec: {np.mean(train_sps[1:])}")
 
 
 if __name__ == "__main__":
@@ -479,5 +541,6 @@ if __name__ == "__main__":
     parser.add_argument("--entropy_cost", default=1e-2)
     parser.add_argument("--number_envs", default=2048)
     parser.add_argument("--batch_size", default=1024)
+    parser.add_argument("--number_of_cell_types", default=5)
     args = parser.parse_args()
     main(args)
