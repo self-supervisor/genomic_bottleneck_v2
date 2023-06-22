@@ -55,7 +55,6 @@ def to1d_CNN(a, x, y, z, out_channel, in_channel, num_out, num_inp):
 
 
 def gather2D(tensor, indices, indices_flat):
-
     old_shape = indices.shape[:-1]
     tensor = gather_nd_torch(tensor, indices, indices_flat, batch_dim=1)
     return torch.reshape(tensor, old_shape)
@@ -109,7 +108,6 @@ def gather2D(tensor, indices, indices_flat):
 
 
 def gather_nd_torch(params, indices, gather_dims_flat, batch_dim=0):
-
     expand = batch_dim == 0
     if expand:
         params = torch.unsqueeze(params, 0)
@@ -145,7 +143,6 @@ def gather_nd_torch(params, indices, gather_dims_flat, batch_dim=0):
 
 
 def gather_nd_torch_dims_flat(params, indices, batch_dim=0):
-
     expand = batch_dim == 0
     if expand:
         params = torch.unsqueeze(params, 0)

@@ -55,7 +55,6 @@ class TrainableRandomDistribution_weight_share(nn.Module):
         return self.w[0].permute(1, 0)
 
     def log_posterior(self, w=None):
-
         """
         Calculates the log_likelihood for each of the weights sampled as a part of the complexity cost
         returns:
@@ -72,7 +71,7 @@ class TrainableRandomDistribution_weight_share(nn.Module):
         log_posteriors = (
             -log_sqrt2pi
             - torch.log(self.sigma)
-            - (((w - self.mu) ** 2) / (2 * self.sigma ** 2))
+            - (((w - self.mu) ** 2) / (2 * self.sigma**2))
             - 0.5
         )
         return log_posteriors.sum()
@@ -115,7 +114,6 @@ class TrainableRandomDistribution_weight_share_CNN(nn.Module):
         return self.w[0]
 
     def log_posterior(self, w=None):
-
         """
         Calculates the log_likelihood for each of the weights sampled as a part of the complexity cost
         returns:
@@ -132,7 +130,7 @@ class TrainableRandomDistribution_weight_share_CNN(nn.Module):
         log_posteriors = (
             -log_sqrt2pi
             - torch.log(self.sigma)
-            - (((w - self.mu) ** 2) / (2 * self.sigma ** 2))
+            - (((w - self.mu) ** 2) / (2 * self.sigma**2))
             - 0.5
         )
         return log_posteriors.sum()
@@ -176,7 +174,6 @@ class BayesianGRU(BayesianRNN):
         prior_dist=None,
         **kwargs
     ):
-
         super().__init__(**kwargs)
         self.in_features = in_features
         self.out_features = out_features
@@ -367,7 +364,6 @@ class BayesianGRU(BayesianRNN):
         return weight_ih, weight_hh, bias
 
     def get_frozen_weights(self):
-
         # get all deterministic weights
         weight_ih = self.weight_ih_mu
         weight_hh = self.weight_hh_mu
@@ -379,7 +375,6 @@ class BayesianGRU(BayesianRNN):
         return weight_ih, weight_hh, bias
 
     def forward_(self, x, hidden_states, sharpen_loss):
-
         if self.loss_to_sharpen is not None:
             sharpen_loss = self.loss_to_sharpen
             weight_ih, weight_hh, bias = self.sharpen_posterior(
@@ -435,7 +430,6 @@ class BayesianGRU(BayesianRNN):
         return hidden_seq, h_t
 
     def forward_frozen(self, x, hidden_states):
-
         weight_ih, weight_hh, bias = self.get_frozen_weights()
 
         # Assumes x is of shape (batch, sequence, feature)
@@ -479,7 +473,6 @@ class BayesianGRU(BayesianRNN):
         return hidden_seq, h_t
 
     def forward(self, x, hidden_states=None, sharpen_loss=None):
-
         if self.freeze:
             return self.forward_frozen(x, hidden_states)
 
@@ -658,7 +651,6 @@ class BayesianLinear(BayesianModule):
 
 
 class BayesianConv2d(BayesianModule):
-
     # Implements Bayesian Conv2d layer, by drawing them using Weight Uncertanity on Neural Networks algorithm
     """
     Bayesian Linear layer, implements a Convolution 2D layer as proposed on Weight Uncertainity on Neural Networks

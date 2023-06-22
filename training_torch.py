@@ -103,14 +103,18 @@ def main(args):
 
             policy = []
             for w1, w2 in zip(policy_layers, policy_layers[1:]):
-                policy.append(nn.Linear(w1, w2),)
+                policy.append(
+                    nn.Linear(w1, w2),
+                )
                 policy.append(nn.SiLU())
             policy.pop()  # drop the final activation
             self.policy = nn.Sequential(*policy)
 
             value = []
             for w1, w2 in zip(value_layers, value_layers[1:]):
-                value.append(nn.Linear(w1, w2),)
+                value.append(
+                    nn.Linear(w1, w2),
+                )
                 value.append(nn.SiLU())
             value.pop()  # drop the final activation
             self.value = nn.Sequential(*value)
@@ -277,7 +281,7 @@ def main(args):
             reward_scaling: float,
             device: str,
         ):
-            super(Agent, self).__init__()
+            super(BayesianAgent, self).__init__()
 
             policy = []
             for w1, w2 in zip(policy_layers, policy_layers[1:]):
@@ -454,7 +458,12 @@ def main(args):
             entropy = torch.mean(self.dist_entropy(loc, scale))
             entropy_loss = self.entropy_cost * -entropy
 
-            return policy_loss + v_loss + entropy_loss
+            return (
+                policy_loss + v_loss + entropy_loss,
+                policy_loss,
+                v_loss,
+                entropy_loss,
+            )
 
     StepData = collections.namedtuple(
         "StepData", ("observation", "logits", "action", "reward", "done", "truncation")
@@ -554,7 +563,11 @@ def main(args):
         )
         config["compression_ratio"] = compression_ratio
 
-        wandb.init(project="brax-cshl", config=config)
+        wandb.init(
+            project="brax-cshl",
+            config=config,
+            dir="/grid/zador/data_norepl/augustine/wandb_logging",
+        )
         if is_weight_sharing == True:
             agent = BayesianAgent(
                 number_of_cell_types,
@@ -581,6 +594,10 @@ def main(args):
         sps = 0
         total_steps = 0
         total_loss = 0
+        total_policy_loss = 0
+        total_value_loss = 0
+        total_entropy_loss = 0
+
         for eval_i in range(eval_frequency + 1):
             if progress_fn:
                 t = time.time()
@@ -598,6 +615,9 @@ def main(args):
                     "eval/avg_episode_length": episode_avg_length,
                     "speed/sps": sps,
                     "speed/eval_sps": eval_sps,
+                    "losses/total_policy_loss": total_policy_loss,
+                    "losses/total_value_loss": total_value_loss,
+                    "losses/total_entropy_loss": total_entropy_loss,
                     "losses/total_loss": total_loss,
                 }
                 progress_fn(total_steps, progress)
@@ -645,15 +665,29 @@ def main(args):
 
                     for minibatch_i in range(num_minibatches):
                         td_minibatch = sd_map(lambda d: d[minibatch_i], epoch_td)
-                        loss = agent.loss(td_minibatch._asdict())
+                        loss, policy_loss, v_loss, entropy_loss = agent.loss(
+                            td_minibatch._asdict()
+                        )
                         optimizer.zero_grad()
                         loss.backward()
                         optimizer.step()
+                        total_policy_loss += policy_loss
+                        total_value_loss += v_loss
+                        total_entropy_loss += entropy_loss
                         total_loss += loss
 
             duration = time.time() - t
             total_steps += num_epochs * num_steps
             total_loss = total_loss / (num_epochs * num_update_epochs * num_minibatches)
+            total_entropy_loss = total_entropy_loss / (
+                num_epochs * num_update_epochs * num_minibatches
+            )
+            total_policy_loss = total_policy_loss / (
+                num_epochs * num_update_epochs * num_minibatches
+            )
+            total_value_loss = total_value_loss / (
+                num_epochs * num_update_epochs * num_minibatches
+            )
             sps = num_epochs * num_steps / duration
 
     os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
@@ -670,10 +704,13 @@ def main(args):
         ydata.append(metrics["eval/episode_reward"].cpu())
         eval_sps.append(metrics["speed/eval_sps"])
         train_sps.append(metrics["speed/sps"])
-
         wandb.log(
             {
-                "eval/episode_reward": metrics["eval/episode_reward"].cpu(),
+                "losses/total_loss": metrics["losses/total_loss"],
+                "losses/total_policy_loss": metrics["losses/total_policy_loss"],
+                "losses/total_value_loss": metrics["losses/total_value_loss"],
+                "losses/total_entropy_loss": metrics["losses/total_entropy_loss"],
+                "eval/episode_reward": metrics["eval/episode_reward"],
                 "speed/eval_sps": metrics["speed/eval_sps"],
                 "speed/sps": metrics["speed/sps"],
             },
