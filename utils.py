@@ -1,5 +1,7 @@
-import torch
+from typing import List
+
 import numpy as np
+import torch
 
 
 def find_num_neuron_per_type(num_features, num_types):
@@ -238,3 +240,46 @@ def get_indices_CNN(n_neurons_arr, unit_types_arr):
     )
 
     return indices
+
+
+def calculate_parameters(mlp) -> int:
+    # The number of parameters between two layers is the product of the
+    # number of neurons in these two layers, plus the number of neurons
+    # in the current layer (for bias terms).
+    # There are no parameters for the first layer, so we start from the second layer.
+    return sum([mlp[i - 1] * mlp[i] + mlp[i] for i in range(1, len(mlp))])
+
+
+def calculate_compression_ratio(
+    env,
+    vanilla_policy_layers: List[int],
+    vanilla_value_layers: List[int],
+    number_of_cell_types: int,
+) -> float:
+    number_of_vanilla_policy_parameters = calculate_parameters(vanilla_policy_layers)
+    number_of_vanilla_value_parameters = calculate_parameters(vanilla_value_layers)
+    total_vanilla_parameters = (
+        number_of_vanilla_policy_parameters + number_of_vanilla_value_parameters
+    )
+    compressed_policy_layers = [
+        env.observation_space.shape[-1],
+        number_of_cell_types,
+        number_of_cell_types,
+        1,
+    ]
+    compressed_value_layers = [
+        env.observation_space.shape[-1],
+        number_of_cell_types,
+        number_of_cell_types,
+        1,
+    ]
+    number_of_compressed_policy_parameters = calculate_parameters(
+        compressed_policy_layers
+    )
+    number_of_compressed_value_parameters = calculate_parameters(
+        compressed_value_layers
+    )
+    total_compressed_parameters = (
+        number_of_compressed_policy_parameters + number_of_compressed_value_parameters
+    )
+    return total_vanilla_parameters / total_compressed_parameters

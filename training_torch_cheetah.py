@@ -83,12 +83,12 @@ def main(args):
         bayesian_agent_to_sample: None,
         is_weight_sharing: bool,
         number_of_cell_types: int,
-        env_name: str = "cheetah",
+        env_name: str = "halfcheetah",
         num_envs: int = 2_048,
         episode_length: int = 1_000,
         device: str = "cuda",
-        num_timesteps: int = 50_000_000,
-        eval_frequency: int = 100,
+        num_timesteps: int = 500_000_000,
+        eval_frequency: int = 10,
         unroll_length: int = 20,
         batch_size: int = 512,
         num_minibatches: int = 32,
@@ -316,19 +316,20 @@ def main(args):
 
     print("now doing within lifetime learning...")
 
-    agent = train(
-        wandb_prefix="within_lifeteime_learning",
-        bayesian_agent_to_sample=agent,
-        env_name=args.env_name,
-        is_weight_sharing=args.is_weight_sharing,
-        number_of_cell_types=args.number_of_cell_types,
-        progress_fn=progress,
-        seed=int(args.seed),
-        num_envs=int(args.number_envs),
-        batch_size=int(args.batch_size),
-        learning_rate=float(args.learning_rate),
-        entropy_cost=float(args.entropy_cost),
-    )
+    if args.is_weight_sharing != False:
+        agent = train(
+            wandb_prefix="within_lifeteime_learning",
+            bayesian_agent_to_sample=agent,
+            env_name=args.env_name,
+            is_weight_sharing=args.is_weight_sharing,
+            number_of_cell_types=args.number_of_cell_types,
+            progress_fn=progress,
+            seed=int(args.seed),
+            num_envs=int(args.number_envs),
+            batch_size=int(args.batch_size),
+            learning_rate=float(args.learning_rate),
+            entropy_cost=float(args.entropy_cost),
+        )
 
 
 if __name__ == "__main__":

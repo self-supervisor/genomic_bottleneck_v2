@@ -1,18 +1,16 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torchvision.datasets as dsets
 import torchvision.transforms as transforms
-import numpy as np
-
-from blitz.modules.base_bayesian_module import BayesianModule
-from blitz.modules.weight_sampler import (
-    TrainableRandomDistribution,
-    PriorWeightDistribution,
-)
-from blitz.modules.base_bayesian_module import BayesianModule, BayesianRNN
 from blitz.losses import kl_divergence_from_nn
+from blitz.modules.base_bayesian_module import BayesianModule, BayesianRNN
+from blitz.modules.weight_sampler import (
+    PriorWeightDistribution,
+    TrainableRandomDistribution,
+)
 from blitz.utils import variational_estimator
 
 from utils import *

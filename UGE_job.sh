@@ -1,16 +1,17 @@
 #!/bin/bash
 
 #$ -cwd
-#$ -o elzar-logs
-#$ -e elzar-logs
+#$ -o elzar-logs_weight_sharing_cheetah
+#$ -e elzar-logs_weight_sharing_cheetah
 #$ -j y
-#$ -N failed_seeds
-#$ -t 1-2
+#$ -N weight_sharing_cheetah
+#$ -t 1-25
 #$ -pe threads 8
 #$ -l gpu=1
 
-# Calculate index for seed list (only index that changes now)
-let "seed_idx = (${SGE_TASK_ID}-1) % 2"   # 2 is the length of seed_list
+# Calculate indices for each list
+let "seed_idx = (${SGE_TASK_ID}-1) / 5 % 5"   # 5 is the length of seed_list
+let "cell_types_idx = (${SGE_TASK_ID}-1) % 5"   # 5 is the length of number_of_cell_types_list
 
-# Call the shell script with this index
-bash run_my_job.sh $seed_idx
+# Call the shell script with these indices
+bash run_my_job.sh $seed_idx $cell_types_idx
