@@ -13,6 +13,7 @@ class Agent(nn.Module):
 
     def __init__(
         self,
+        clipping_val: float,
         policy_layers: Sequence[int],
         value_layers: Sequence[int],
         entropy_cost: float,
@@ -44,7 +45,7 @@ class Agent(nn.Module):
         self.discounting = discounting
         self.reward_scaling = reward_scaling
         self.lambda_ = 0.95
-        self.epsilon = 0.3
+        self.epsilon = clipping_val
         self.device = device
 
     @torch.jit.export
@@ -194,6 +195,7 @@ class BayesianAgent(nn.Module):
 
     def __init__(
         self,
+        clipping_val: float,
         number_of_cell_types: int,
         policy_layers: Sequence[int],
         value_layers: Sequence[int],
@@ -384,7 +386,11 @@ class BayesianAgent(nn.Module):
             entropy_loss,
         )
 
-    def sample_vanilla_agent(self):
+    def sample_vanilla_agent(
+        self, clipping_val: float, learning_rate: float, entropy_cost: float
+    ):
+        self.learning_rate = learning_rate
+        self.entropy_cost = entropy_cost
         policy_layers = []
         value_layers = []
         for a_layer in self.policy:
@@ -412,6 +418,7 @@ class BayesianAgent(nn.Module):
             layer.in_features for layer in value_layers if type(layer) == nn.Linear
         ]
         vanilla_agent = Agent(
+            clipping_val,
             policy_layer_widths,
             value_layer_widths,
             self.entropy_cost,

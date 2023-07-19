@@ -78,17 +78,18 @@ def main(args):
         return observation, td
 
     def train(
+        clipping_val: float,
         seed: int,
         wandb_prefix: str,
         bayesian_agent_to_sample: None,
         is_weight_sharing: bool,
         number_of_cell_types: int,
-        env_name: str = "cheetah",
+        env_name: str = "halfcheetah",
         num_envs: int = 2_048,
         episode_length: int = 1_000,
         device: str = "cuda",
-        num_timesteps: int = 50_000_000,
-        eval_frequency: int = 100,
+        num_timesteps: int = 100_000_000,
+        eval_frequency: int = 30,
         unroll_length: int = 20,
         batch_size: int = 512,
         num_minibatches: int = 32,
@@ -137,11 +138,15 @@ def main(args):
             config=config,
             dir="/grid/zador/data_norepl/augustine/wandb_logging",
         )
+
         if bayesian_agent_to_sample is not None:
-            agent = bayesian_agent_to_sample.sample_vanilla_agent()
+            agent = bayesian_agent_to_sample.sample_vanilla_agent(
+                clipping_val, learning_rate, entropy_cost
+            )
         else:
             if is_weight_sharing == True:
                 agent = BayesianAgent(
+                    clipping_val,
                     number_of_cell_types,
                     vanilla_policy_layers,
                     vanilla_value_layers,
@@ -152,6 +157,7 @@ def main(args):
                 )
             elif is_weight_sharing == False:
                 agent = Agent(
+                    clipping_val,
                     vanilla_policy_layers,
                     vanilla_value_layers,
                     entropy_cost,
@@ -296,6 +302,7 @@ def main(args):
         )
 
     agent = train(
+        clipping_val=(args.clipping_val),
         wandb_prefix="bayesian",
         bayesian_agent_to_sample=None,
         env_name=args.env_name,
@@ -316,19 +323,21 @@ def main(args):
 
     print("now doing within lifetime learning...")
 
-    agent = train(
-        wandb_prefix="within_lifeteime_learning",
-        bayesian_agent_to_sample=agent,
-        env_name=args.env_name,
-        is_weight_sharing=args.is_weight_sharing,
-        number_of_cell_types=args.number_of_cell_types,
-        progress_fn=progress,
-        seed=int(args.seed),
-        num_envs=int(args.number_envs),
-        batch_size=int(args.batch_size),
-        learning_rate=float(args.learning_rate),
-        entropy_cost=float(args.entropy_cost),
-    )
+    if args.is_weight_sharing != False:
+        agent = train(
+            clipping_val=(args.within_lifetime_clipping_val),
+            wandb_prefix="within_lifeteime_learning",
+            bayesian_agent_to_sample=agent,
+            env_name=args.env_name,
+            is_weight_sharing=args.is_weight_sharing,
+            number_of_cell_types=args.number_of_cell_types,
+            progress_fn=progress,
+            seed=int(args.seed),
+            num_envs=int(args.number_envs),
+            batch_size=int(args.batch_size),
+            learning_rate=float(args.within_lifetime_learning_rate),
+            entropy_cost=float(args.within_lifetime_entropy_cost),
+        )
 
 
 if __name__ == "__main__":
@@ -349,6 +358,10 @@ if __name__ == "__main__":
         nargs="?",
         const=True,
     )
-    parser.add_argument("--env_name", default="ant")
+    parser.add_argument("--clipping_val", default=0.3, type=float)
+    parser.add_argument("--within_lifetime_clipping_val", default=0.3, type=float)
+    parser.add_argument("--within_lifetime_learning_rate", default=3e-4, type=float)
+    parser.add_argument("--within_lifetime_entropy_cost", default=1e-2, type=float)
+    parser.add_argument("--env_name", default="halfcheetah")
     args = parser.parse_args()
     main(args)

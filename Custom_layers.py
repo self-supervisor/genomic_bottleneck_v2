@@ -1,18 +1,17 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torchvision.datasets as dsets
-import torchvision.transforms as transforms
-import numpy as np
 
-from blitz.modules.base_bayesian_module import BayesianModule
-from blitz.modules.weight_sampler import (
-    TrainableRandomDistribution,
-    PriorWeightDistribution,
-)
-from blitz.modules.base_bayesian_module import BayesianModule, BayesianRNN
+# import torchvision.datasets as dsets
+# import torchvision.transforms as transforms
 from blitz.losses import kl_divergence_from_nn
+from blitz.modules.base_bayesian_module import BayesianModule, BayesianRNN
+from blitz.modules.weight_sampler import (
+    PriorWeightDistribution,
+    TrainableRandomDistribution,
+)
 from blitz.utils import variational_estimator
 
 from utils import *
@@ -71,7 +70,7 @@ class TrainableRandomDistribution_weight_share(nn.Module):
         log_posteriors = (
             -log_sqrt2pi
             - torch.log(self.sigma)
-            - (((w - self.mu) ** 2) / (2 * self.sigma**2))
+            - (((w - self.mu) ** 2) / (2 * self.sigma ** 2))
             - 0.5
         )
         return log_posteriors.sum()
@@ -130,7 +129,7 @@ class TrainableRandomDistribution_weight_share_CNN(nn.Module):
         log_posteriors = (
             -log_sqrt2pi
             - torch.log(self.sigma)
-            - (((w - self.mu) ** 2) / (2 * self.sigma**2))
+            - (((w - self.mu) ** 2) / (2 * self.sigma ** 2))
             - 0.5
         )
         return log_posteriors.sum()

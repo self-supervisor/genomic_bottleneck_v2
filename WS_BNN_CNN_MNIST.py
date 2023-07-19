@@ -1,17 +1,17 @@
+import os
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torchvision.datasets as dsets
 import torchvision.transforms as transforms
-import numpy as np
-import os
-
 from blitz.losses import kl_divergence_from_nn
 from blitz.utils import variational_estimator
 
-from utils import *
 from Custom_layers import *
+from utils import *
 
 train_dataset = dsets.MNIST(
     root="./data", train=True, transform=transforms.ToTensor(), download=True

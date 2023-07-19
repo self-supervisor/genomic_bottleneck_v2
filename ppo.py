@@ -10,15 +10,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from blitz.losses import kl_divergence_from_nn
+from blitz.utils import variational_estimator
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-
-from blitz.losses import kl_divergence_from_nn
-from blitz.utils import variational_estimator
-
-from utils import *
 from Custom_layers import *
+from utils import *
 
 
 def parse_args():
