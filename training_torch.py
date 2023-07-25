@@ -78,24 +78,26 @@ def main(args):
         return observation, td
 
     def train(
+        clipping_val: float,
         seed: int,
         wandb_prefix: str,
         bayesian_agent_to_sample: None,
         is_weight_sharing: bool,
         number_of_cell_types: int,
-        env_name: str = "ant",
+        complexity_cost: float,
+        env_name: str = "halfcheetah",
         num_envs: int = 2_048,
         episode_length: int = 1_000,
         device: str = "cuda",
         num_timesteps: int = 100_000_000,
-        eval_frequency: int = 100,
-        unroll_length: int = 5,
-        batch_size: int = 1024,
+        eval_frequency: int = 30,
+        unroll_length: int = 20,
+        batch_size: int = 512,
         num_minibatches: int = 32,
-        num_update_epochs: int = 4,
-        reward_scaling: float = 0.1,
+        num_update_epochs: int = 8,
+        reward_scaling: float = 1,
         entropy_cost: float = 1e-2,
-        discounting: float = 0.97,
+        discounting: float = 0.95,
         learning_rate: float = 3e-4,
         progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
     ):
@@ -137,12 +139,15 @@ def main(args):
             config=config,
             dir="/grid/zador/data_norepl/augustine/wandb_logging",
         )
+
         if bayesian_agent_to_sample is not None:
-            agent = bayesian_agent_to_sample.sample_vanilla_agent()
+            agent = bayesian_agent_to_sample.sample_vanilla_agent(
+                clipping_val, learning_rate, entropy_cost
+            )
         else:
             if is_weight_sharing == True:
                 agent = BayesianAgent(
-                    0.3,
+                    clipping_val,
                     number_of_cell_types,
                     vanilla_policy_layers,
                     vanilla_value_layers,
@@ -150,10 +155,11 @@ def main(args):
                     discounting,
                     reward_scaling,
                     device,
+                    complexity_cost,
                 )
             elif is_weight_sharing == False:
                 agent = Agent(
-                    0.3,
+                    clipping_val,
                     vanilla_policy_layers,
                     vanilla_value_layers,
                     entropy_cost,
@@ -171,6 +177,7 @@ def main(args):
         total_policy_loss = 0
         total_value_loss = 0
         total_entropy_loss = 0
+        total_kl_loss = 0
 
         for eval_i in range(eval_frequency + 1):
             if progress_fn:
@@ -239,7 +246,7 @@ def main(args):
 
                     for minibatch_i in range(num_minibatches):
                         td_minibatch = sd_map(lambda d: d[minibatch_i], epoch_td)
-                        loss, policy_loss, v_loss, entropy_loss = agent.loss(
+                        loss, policy_loss, v_loss, entropy_loss, kl_loss = agent.loss(
                             td_minibatch._asdict()
                         )
                         optimizer.zero_grad()
@@ -249,6 +256,7 @@ def main(args):
                         total_value_loss += v_loss
                         total_entropy_loss += entropy_loss
                         total_loss += loss
+                        total_kl_loss += kl_loss
 
             duration = time.time() - t
             total_steps += num_epochs * num_steps
@@ -298,6 +306,7 @@ def main(args):
         )
 
     agent = train(
+        clipping_val=(args.clipping_val),
         wandb_prefix="bayesian",
         bayesian_agent_to_sample=None,
         env_name=args.env_name,
@@ -305,10 +314,16 @@ def main(args):
         number_of_cell_types=args.number_of_cell_types,
         progress_fn=progress,
         seed=int(args.seed),
-        num_envs=int(args.number_envs),
+        num_envs=int(args.num_envs),
         batch_size=int(args.batch_size),
         learning_rate=float(args.learning_rate),
         entropy_cost=float(args.entropy_cost),
+        complexity_cost=float(args.complexity_cost),
+        num_timesteps=int(args.num_timesteps),
+        reward_scaling=float(args.reward_scaling),
+        episode_length=int(args.episode_length),
+        discounting=float(args.discounting),
+        num_update_epochs=int(args.num_updates_per_batch),
     )
 
     print(f"time to jit: {times[1] - times[0]}")
@@ -316,21 +331,29 @@ def main(args):
     print(f"eval steps/sec: {np.mean(eval_sps)}")
     print(f"train steps/sec: {np.mean(train_sps)}")
 
-    print("now doing within lifetime learning...")
+    # print("now doing within lifetime learning...")
 
-    agent = train(
-        wandb_prefix="within_lifeteime_learning",
-        bayesian_agent_to_sample=agent,
-        env_name=args.env_name,
-        is_weight_sharing=args.is_weight_sharing,
-        number_of_cell_types=args.number_of_cell_types,
-        progress_fn=progress,
-        seed=int(args.seed),
-        num_envs=args.number_envs,
-        batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-        entropy_cost=args.entropy_cost,
-    )
+    if args.is_weight_sharing != False:
+        agent = train(
+            clipping_val=(args.within_lifetime_clipping_val),
+            wandb_prefix="within_lifeteime_learning",
+            bayesian_agent_to_sample=agent,
+            env_name=args.env_name,
+            is_weight_sharing=args.is_weight_sharing,
+            number_of_cell_types=args.number_of_cell_types,
+            progress_fn=progress,
+            seed=int(args.seed),
+            num_envs=int(args.num_envs),
+            batch_size=int(args.batch_size),
+            learning_rate=float(args.within_lifetime_learning_rate),
+            entropy_cost=float(args.within_lifetime_entropy_cost),
+            complexity_cost=float(args.complexity_cost),
+            num_timesteps=int(args.num_timesteps),
+            reward_scaling=float(args.reward_scaling),
+            episode_length=int(args.episode_length),
+            discounting=float(args.discounting),
+            num_update_epochs=int(args.num_updates_per_batch),
+        )
 
 
 if __name__ == "__main__":
@@ -338,12 +361,17 @@ if __name__ == "__main__":
     from distutils.util import strtobool
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", default=0)
-    parser.add_argument("--learning_rate", default=3e-4)
-    parser.add_argument("--entropy_cost", default=1e-2)
-    parser.add_argument("--number_envs", default=2048)
-    parser.add_argument("--batch_size", default=1024)
-    parser.add_argument("--number_of_cell_types", default=64)
+
+    # Existing arguments
+    parser.add_argument("--seed", default=0, type=int)
+    parser.add_argument("--learning_rate", default=3e-4, type=float)
+    parser.add_argument("--entropy_cost", default=1e-2, type=float)
+    parser.add_argument("--num_envs", default=2048, type=int)
+    parser.add_argument("--batch_size", default=1024, type=int)
+    parser.add_argument("--num_update_epochs", default=2, type=int)
+    parser.add_argument("--num_minibatches", default=32, type=int)
+    parser.add_argument("--unroll_length", default=5, type=int)
+    parser.add_argument("--number_of_cell_types", default=64, type=int)
     parser.add_argument(
         "--is_weight_sharing",
         type=lambda x: bool(strtobool(x)),
@@ -351,6 +379,18 @@ if __name__ == "__main__":
         nargs="?",
         const=True,
     )
-    parser.add_argument("--env_name", default="ant")
+    parser.add_argument("--clipping_val", default=0.3, type=float)
+    parser.add_argument("--within_lifetime_clipping_val", default=0.3, type=float)
+    parser.add_argument("--within_lifetime_learning_rate", default=3e-4, type=float)
+    parser.add_argument("--within_lifetime_entropy_cost", default=1e-2, type=float)
+    parser.add_argument("--env_name", default="halfcheetah", type=str)
+    parser.add_argument("--complexity_cost", type=float, default=1.0)
+    parser.add_argument("--num_timesteps", default=100000000, type=int)
+    parser.add_argument("--num_evals", default=30, type=int)
+    parser.add_argument("--reward_scaling", default=10, type=float)
+    parser.add_argument("--episode_length", default=1000, type=int)
+    parser.add_argument("--num_updates_per_batch", default=4, type=int)
+    parser.add_argument("--discounting", default=0.97, type=float)
+
     args = parser.parse_args()
     main(args)
