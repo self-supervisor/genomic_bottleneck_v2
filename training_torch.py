@@ -320,6 +320,7 @@ def main(args):
         entropy_cost=float(args.entropy_cost),
         complexity_cost=float(args.complexity_cost),
         num_timesteps=int(args.num_timesteps),
+        eval_frequency=int(args.eval_frequency),
         reward_scaling=float(args.reward_scaling),
         episode_length=int(args.episode_length),
         discounting=float(args.discounting),
@@ -349,6 +350,7 @@ def main(args):
             entropy_cost=float(args.within_lifetime_entropy_cost),
             complexity_cost=float(args.complexity_cost),
             num_timesteps=int(args.num_timesteps),
+            eval_frequency=int(args.eval_frequency),
             reward_scaling=float(args.reward_scaling),
             episode_length=int(args.episode_length),
             discounting=float(args.discounting),
@@ -386,7 +388,7 @@ if __name__ == "__main__":
     parser.add_argument("--env_name", default="halfcheetah", type=str)
     parser.add_argument("--complexity_cost", type=float, default=1.0)
     parser.add_argument("--num_timesteps", default=100000000, type=int)
-    parser.add_argument("--num_evals", default=30, type=int)
+    parser.add_argument("--eval_frequency", default=30, type=int)
     parser.add_argument("--reward_scaling", default=10, type=float)
     parser.add_argument("--episode_length", default=1000, type=int)
     parser.add_argument("--num_updates_per_batch", default=4, type=int)

@@ -8,10 +8,8 @@
 #$ -pe threads 8
 #$ -l gpu=1
 
-# Calculate indices for each list
-let "seed_idx = (${SGE_TASK_ID}-1) / 6 % 5"          # 5 is the length of seed_list
-let "complexity_cost_idx = (${SGE_TASK_ID}-1) / 30"  # 1 is the length of complexity_cost_list, but we use the full length of the array job to cycle through it
-let "number_of_cell_types_idx = (${SGE_TASK_ID}-1) % 6" # 6 is the length of number_of_cell_types_list
+let "seed_idx = (${SGE_TASK_ID}-1) / (1*6) % 5"  # Distribute among the 5 seeds
+let "complexity_cost_idx = (${SGE_TASK_ID}-1) / 6 % 1"  # Always 0 as there's only one value
+let "number_of_cell_types_idx = (${SGE_TASK_ID}-1) % 6"  # Distribute among the 6 number_of_cell_types values
 
-# Call the shell script with these indices
 bash ant.sh $seed_idx $complexity_cost_idx $number_of_cell_types_idx
