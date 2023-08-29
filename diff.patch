@@ -1,0 +1,352 @@
+diff --git a/UGE_job.sh b/UGE_job.sh
+index aba8746..1ecfc24 100644
+--- a/UGE_job.sh
++++ b/UGE_job.sh
+@@ -1,17 +1,11 @@
+ #!/bin/bash
+ 
+ #$ -cwd
+-#$ -o elzar-logs_cheetah_sweep
+-#$ -e elzar-logs_cheetah_sweep
+-#$ -N cheetah_sweep
+-#$ -t 1-60
+-#$ -tc 10
++#$ -o cheetah_fix
++#$ -e cheetah_fix
++#$ -N cheetah_fix
++#$ -t 1-30
+ #$ -pe threads 8
+ #$ -l gpu=1
+ 
+-# Calculate indices for each list
+-let "seed_idx = (${SGE_TASK_ID}-1) / 4 % 15"  # 15 is the length of seed_list
+-let "cell_types_idx = (${SGE_TASK_ID}-1) % 4"  # 4 is the length of number_of_cell_types_list
+-
+-# Call the shell script with these indices
+-bash run_my_job.sh $seed_idx $cell_types_idx
++bash run_my_job.sh $SGE_TASK_ID
+diff --git a/models.py b/models.py
+index 33f0838..cf8c881 100644
+--- a/models.py
++++ b/models.py
+@@ -4,6 +4,7 @@ from typing import Dict, Sequence
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
++from blitz.losses.kl_divergence import kl_divergence_from_nn
+ 
+ from Custom_layers import BayesianLinear
+ 
+@@ -181,12 +182,14 @@ class Agent(nn.Module):
+         # Entropy reward
+         entropy = torch.mean(self.dist_entropy(loc, scale))
+         entropy_loss = self.entropy_cost * -entropy
++        kl_loss = torch.zeros_like(entropy_loss)
+ 
+         return (
+-            policy_loss + v_loss + entropy_loss,
++            policy_loss + v_loss + entropy_loss + kl_loss,
+             policy_loss,
+             v_loss,
+             entropy_loss,
++            kl_loss,
+         )
+ 
+ 
+@@ -203,6 +206,7 @@ class BayesianAgent(nn.Module):
+         discounting: float,
+         reward_scaling: float,
+         device: str,
++        complexity_cost: float,
+     ):
+         super(BayesianAgent, self).__init__()
+ 
+@@ -243,6 +247,7 @@ class BayesianAgent(nn.Module):
+         self.reward_scaling = reward_scaling
+         self.lambda_ = 0.95
+         self.epsilon = 0.3
++        self.complexity_cost = complexity_cost
+         self.device = device
+ 
+     @torch.jit.export
+@@ -378,12 +383,16 @@ class BayesianAgent(nn.Module):
+         # Entropy reward
+         entropy = torch.mean(self.dist_entropy(loc, scale))
+         entropy_loss = self.entropy_cost * -entropy
++        kl_loss = self.complexity_cost * (
++            kl_divergence_from_nn(self.policy) + kl_divergence_from_nn(self.value)
++        )
+ 
+         return (
+-            policy_loss + v_loss + entropy_loss,
++            policy_loss + v_loss + entropy_loss + kl_loss,
+             policy_loss,
+             v_loss,
+             entropy_loss,
++            kl_loss,
+         )
+ 
+     def sample_vanilla_agent(
+diff --git a/run_my_job.sh b/run_my_job.sh
+index 79c0cc0..0b0cbc1 100644
+--- a/run_my_job.sh
++++ b/run_my_job.sh
+@@ -1,18 +1,65 @@
+-#!/bin/bash
++# #!/bin/bash
+ 
+-# Declare the lists
+-seed_list=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+-number_of_cell_types_list=(64 4 3 2)
+-env_name_list=("ant")
++# # Declare the lists
++# seed_list=(1 2 3 4 5)
++# number_of_cell_types_list=(64 16 2)
++# entropy_cost_list=(1e-2 1e-3 1e-4)
++# learning_rate_list=(3e-2 3e-3 3e-4 3e-5)
++# clipping_val_list=(3e0 3e-1 3e-2)
++# unroll_length_list=(1 5 20)
++# batch_size_list=(512 1024)
++# num_minibatches_list=(4 8 16 32)
++# num_update_epochs_list=(2 4 8)
++# env_name_list=("ant")
+ 
+-# The script now expects indices for seed and cell types
+-seed_idx=$1
+-number_of_cell_types_idx=$2
++# # The script now expects indices for seed and cell types
++# seed_idx=$1
++# number_of_cell_types_idx=$2
++
++# # Fetch the actual values using the indices
++# seed=${seed_list[$seed_idx]}
++# number_of_cell_types=${number_of_cell_types_list[$number_of_cell_types_idx]}
++# env_name=${env_name_list[0]}  # This index is always 0
++
++# # Run the Python script with these parameters
++# python training_torch.py --env_name $env_name --is_weight_sharing True --seed $seed --number_of_cell_types $number_of_cell_types
++
++
++# #!/bin/bash
++
++# # Declare the lists
++# seed_list=(1 2 3 4 5)
++# complexity_cost_list=(0.00000001 0.0000001 0.0000001 0.000001 0.00001 0.0001)
++# number_of_cell_types_list=(64 16)  # Assuming a list for the example
++# env_name_list=("halfcheetah")
++
++# # The script now expects indices for seed, complexity_cost, and cell types
++# seed_idx=$1
++# complexity_cost_idx=$2
++# number_of_cell_types_idx=$3
++
++# # Fetch the actual values using the indices
++# seed=${seed_list[$seed_idx]}
++# complexity_cost=${complexity_cost_list[$complexity_cost_idx]}
++# number_of_cell_types=${number_of_cell_types_list[$number_of_cell_types_idx]}
++# env_name=${env_name_list[0]}  # This index is always 0
++
++# # Run the Python script with these parameters
++# python training_torch.py --complexity_cost $complexity_cost --env_name $env_name --is_weight_sharing True --seed $seed --number_of_cell_types $number_of_cell_types
++# Define lists
++seed_list=(1 2 3 4 5)
++number_of_cell_types_list=(64 32 16 8 4 2)
++
++# The script now expects the task index
++task_idx=$1
++
++# Calculate seed and number_of_cell_types indices based on task index
++let "seed_idx = (${task_idx}-1) / 6"  # 6 is the number of different cell types
++let "number_of_cell_types_idx = (${task_idx}-1) % 6"
+ 
+ # Fetch the actual values using the indices
+ seed=${seed_list[$seed_idx]}
+ number_of_cell_types=${number_of_cell_types_list[$number_of_cell_types_idx]}
+-env_name=${env_name_list[0]}  # This index is always 0
+ 
+-# Run the Python script with these parameters
+-python training_torch.py --env_name $env_name --is_weight_sharing True --seed $seed --number_of_cell_types $number_of_cell_types
++# Run the command
++python training_torch.py --complexity_cost 0.0001 --env_name halfcheetah --is_weight_sharing True --seed $seed --number_of_cell_types $number_of_cell_types
+diff --git a/training_torch.py b/training_torch.py
+index cd7d19f..76ee893 100755
+--- a/training_torch.py
++++ b/training_torch.py
+@@ -78,24 +78,26 @@ def main(args):
+         return observation, td
+ 
+     def train(
++        clipping_val: float,
+         seed: int,
+         wandb_prefix: str,
+         bayesian_agent_to_sample: None,
+         is_weight_sharing: bool,
+         number_of_cell_types: int,
+-        env_name: str = "ant",
++        complexity_cost: float,
++        env_name: str = "halfcheetah",
+         num_envs: int = 2_048,
+         episode_length: int = 1_000,
+         device: str = "cuda",
+         num_timesteps: int = 100_000_000,
+-        eval_frequency: int = 100,
+-        unroll_length: int = 5,
+-        batch_size: int = 1024,
++        eval_frequency: int = 30,
++        unroll_length: int = 20,
++        batch_size: int = 512,
+         num_minibatches: int = 32,
+-        num_update_epochs: int = 4,
+-        reward_scaling: float = 0.1,
++        num_update_epochs: int = 8,
++        reward_scaling: float = 1,
+         entropy_cost: float = 1e-2,
+-        discounting: float = 0.97,
++        discounting: float = 0.95,
+         learning_rate: float = 3e-4,
+         progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
+     ):
+@@ -137,12 +139,15 @@ def main(args):
+             config=config,
+             dir="/grid/zador/data_norepl/augustine/wandb_logging",
+         )
++
+         if bayesian_agent_to_sample is not None:
+-            agent = bayesian_agent_to_sample.sample_vanilla_agent()
++            agent = bayesian_agent_to_sample.sample_vanilla_agent(
++                clipping_val, learning_rate, entropy_cost
++            )
+         else:
+             if is_weight_sharing == True:
+                 agent = BayesianAgent(
+-                    0.3,
++                    clipping_val,
+                     number_of_cell_types,
+                     vanilla_policy_layers,
+                     vanilla_value_layers,
+@@ -150,10 +155,11 @@ def main(args):
+                     discounting,
+                     reward_scaling,
+                     device,
++                    complexity_cost,
+                 )
+             elif is_weight_sharing == False:
+                 agent = Agent(
+-                    0.3,
++                    clipping_val,
+                     vanilla_policy_layers,
+                     vanilla_value_layers,
+                     entropy_cost,
+@@ -171,6 +177,7 @@ def main(args):
+         total_policy_loss = 0
+         total_value_loss = 0
+         total_entropy_loss = 0
++        total_kl_loss = 0
+ 
+         for eval_i in range(eval_frequency + 1):
+             if progress_fn:
+@@ -239,7 +246,7 @@ def main(args):
+ 
+                     for minibatch_i in range(num_minibatches):
+                         td_minibatch = sd_map(lambda d: d[minibatch_i], epoch_td)
+-                        loss, policy_loss, v_loss, entropy_loss = agent.loss(
++                        loss, policy_loss, v_loss, entropy_loss, kl_loss = agent.loss(
+                             td_minibatch._asdict()
+                         )
+                         optimizer.zero_grad()
+@@ -249,6 +256,7 @@ def main(args):
+                         total_value_loss += v_loss
+                         total_entropy_loss += entropy_loss
+                         total_loss += loss
++                        total_kl_loss += kl_loss
+ 
+             duration = time.time() - t
+             total_steps += num_epochs * num_steps
+@@ -298,6 +306,7 @@ def main(args):
+         )
+ 
+     agent = train(
++        clipping_val=(args.clipping_val),
+         wandb_prefix="bayesian",
+         bayesian_agent_to_sample=None,
+         env_name=args.env_name,
+@@ -305,10 +314,11 @@ def main(args):
+         number_of_cell_types=args.number_of_cell_types,
+         progress_fn=progress,
+         seed=int(args.seed),
+-        num_envs=int(args.number_envs),
++        num_envs=int(args.num_envs),
+         batch_size=int(args.batch_size),
+         learning_rate=float(args.learning_rate),
+         entropy_cost=float(args.entropy_cost),
++        complexity_cost=float(args.complexity_cost),
+     )
+ 
+     print(f"time to jit: {times[1] - times[0]}")
+@@ -318,19 +328,24 @@ def main(args):
+ 
+     print("now doing within lifetime learning...")
+ 
+-    agent = train(
+-        wandb_prefix="within_lifeteime_learning",
+-        bayesian_agent_to_sample=agent,
+-        env_name=args.env_name,
+-        is_weight_sharing=args.is_weight_sharing,
+-        number_of_cell_types=args.number_of_cell_types,
+-        progress_fn=progress,
+-        seed=int(args.seed),
+-        num_envs=args.number_envs,
+-        batch_size=args.batch_size,
+-        learning_rate=args.learning_rate,
+-        entropy_cost=args.entropy_cost,
+-    )
++    if args.is_weight_sharing != False:
++        agent = train(
++            clipping_val=(args.within_lifetime_clipping_val),
++            wandb_prefix="within_lifeteime_learning",
++            bayesian_agent_to_sample=agent,
++            env_name=args.env_name,
++            is_weight_sharing=args.is_weight_sharing,
++            number_of_cell_types=args.number_of_cell_types,
++            progress_fn=progress,
++            seed=int(args.seed),
++            num_envs=int(args.num_envs),
++            batch_size=int(args.batch_size),
++            learning_rate=float(args.within_lifetime_learning_rate),
++            entropy_cost=float(args.within_lifetime_entropy_cost),
++            complexity_cost=float(args.complexity_cost),
++            num_timesteps=300_000_000,
++            eval_frequency=100,
++        )
+ 
+ 
+ if __name__ == "__main__":
+@@ -341,8 +356,11 @@ if __name__ == "__main__":
+     parser.add_argument("--seed", default=0)
+     parser.add_argument("--learning_rate", default=3e-4)
+     parser.add_argument("--entropy_cost", default=1e-2)
+-    parser.add_argument("--number_envs", default=2048)
++    parser.add_argument("--num_envs", default=2048)
+     parser.add_argument("--batch_size", default=1024)
++    parser.add_argument("--num_update_epochs", default=2)
++    parser.add_argument("--num_minibatches", default=32)
++    parser.add_argument("--unroll_length", default=5)
+     parser.add_argument("--number_of_cell_types", default=64)
+     parser.add_argument(
+         "--is_weight_sharing",
+@@ -351,6 +369,11 @@ if __name__ == "__main__":
+         nargs="?",
+         const=True,
+     )
+-    parser.add_argument("--env_name", default="ant")
++    parser.add_argument("--clipping_val", default=0.3, type=float)
++    parser.add_argument("--within_lifetime_clipping_val", default=0.3, type=float)
++    parser.add_argument("--within_lifetime_learning_rate", default=3e-4, type=float)
++    parser.add_argument("--within_lifetime_entropy_cost", default=1e-2, type=float)
++    parser.add_argument("--env_name", default="halfcheetah")
++    parser.add_argument("--complexity_cost", type=float, default=1.0)
+     args = parser.parse_args()
+     main(args)
+diff --git a/training_torch_cheetah.py b/training_torch_cheetah.py
+old mode 100755
+new mode 100644

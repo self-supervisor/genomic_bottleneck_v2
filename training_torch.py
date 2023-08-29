@@ -14,6 +14,7 @@ print("jax devices", jax.devices())
 
 import random
 
+import scipy
 import gym
 import numpy as np
 import torch
@@ -25,6 +26,8 @@ from brax.envs.wrappers import torch as torch_wrapper
 from brax.io import metrics
 from brax.training.agents.ppo import train as ppo
 from torch import nn, optim
+from tqdm import tqdm
+from utils import make_legs_longer
 
 
 def main(args):
@@ -77,23 +80,208 @@ def main(args):
         td = sd_map(torch.stack, sd)
         return observation, td
 
+    def eval_agent(agent, env, episode_length):
+        t = time.time()
+        with torch.no_grad():
+            episode_count, episode_reward = eval_unroll(agent, env, episode_length)
+        duration = time.time() - t
+        episode_avg_length = env.num_envs * episode_length / episode_count
+        eval_sps = env.num_envs * episode_length / duration
+        return episode_reward, episode_count, episode_avg_length, eval_sps
+
+    def make_population_histogram(episode_rewards_list, mean_reward, wandb_prefix):
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Histogram(
+                x=episode_rewards_list, name="histogram of sample network performance",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[mean_reward, mean_reward],
+                y=[0, 100],
+                mode="lines",
+                name="mean network performance",
+                line=dict(color="red", width=2),
+            )
+        )
+        fig.update_layout(
+            xaxis_title="episode return",
+            yaxis_title="count",
+            title="population histogram of network returns",
+        )
+
+        wandb.log({f"sampled_population_of_performances_{wandb_prefix}": fig})
+
+    def eval_population(
+        agent, seed, env_name, num_envs, clipping_val, learning_rate, entropy_cost,
+    ):
+        episode_rewards_list_normal_legs = []
+        episode_rewards_list_normal_legs_sanity_check = []
+        episode_rewards_list_long_legs = []
+        episode_std_list_normal_legs = []
+        episode_std_list_normal_legs_sanity_check = []
+        episode_std_list_long_legs = []
+        episode_length = 1000
+
+        make_legs_longer(length_adjustment=1.0)
+        env = envs.create(
+            env_name,
+            batch_size=num_envs,
+            episode_length=episode_length,
+            backend="spring",
+        )
+        env = gym_wrapper.VectorGymWrapper(env, seed=seed)
+        env = torch_wrapper.TorchWrapper(env, device=agent.device)
+
+        make_legs_longer(length_adjustment=1.2)
+
+        env_long_legs = envs.create(
+            env_name,
+            batch_size=num_envs,
+            episode_length=episode_length,
+            backend="spring",
+        )
+        env_long_legs = gym_wrapper.VectorGymWrapper(env_long_legs, seed=seed)
+        env_long_legs = torch_wrapper.TorchWrapper(env_long_legs, device=agent.device)
+
+        mean_agent = agent.sample_mean_agent(clipping_val, learning_rate, entropy_cost)
+        mean_agent_reward_normal_legs, _, _, _ = eval_agent(
+            mean_agent, env, episode_length
+        )
+        mean_agent_reward_long_legs, _, _, _ = eval_agent(
+            mean_agent, env_long_legs, episode_length
+        )
+
+        make_legs_longer(length_adjustment=1.0)
+        for _ in tqdm(range(100)):
+            sampled_agent = agent.sample_vanilla_agent(
+                clipping_val, learning_rate, entropy_cost
+            )
+            current_agent_returns_normal_legs = []
+            current_agent_returns_normal_legs_sanity_check = []
+            current_agent_returns_long_legs = []
+            for _ in range(10):
+                episode_reward, _, _, _ = eval_agent(sampled_agent, env, episode_length)
+                current_agent_returns_normal_legs.append(episode_reward.cpu().numpy())
+
+                episode_reward, _, _, _ = eval_agent(
+                    sampled_agent, env_long_legs, episode_length
+                )
+                current_agent_returns_long_legs.append(episode_reward.cpu().numpy())
+
+                episode_reward, _, _, _ = eval_agent(sampled_agent, env, episode_length)
+                current_agent_returns_normal_legs_sanity_check.append(
+                    episode_reward.cpu().numpy()
+                )
+
+            episode_rewards_list_normal_legs.append(
+                np.mean(np.array(current_agent_returns_normal_legs))
+            )
+            episode_std_list_normal_legs.append(
+                scipy.stats.sem(np.array(current_agent_returns_normal_legs))
+            )
+            episode_rewards_list_normal_legs_sanity_check.append(
+                np.mean(np.array(current_agent_returns_normal_legs_sanity_check))
+            )
+            episode_std_list_normal_legs_sanity_check.append(
+                np.mean(np.array(current_agent_returns_normal_legs_sanity_check))
+            )
+            episode_rewards_list_long_legs.append(
+                np.mean(np.array(current_agent_returns_long_legs))
+            )
+            episode_std_list_long_legs.append(
+                scipy.stats.sem(np.array(current_agent_returns_long_legs))
+            )
+
+        make_population_histogram(
+            episode_rewards_list_normal_legs,
+            mean_agent_reward_normal_legs.cpu().numpy(),
+            wandb_prefix="normal_legs",
+        )
+        make_population_histogram(
+            episode_rewards_list_long_legs,
+            mean_agent_reward_long_legs.cpu().numpy(),
+            wandb_prefix="long_legs",
+        )
+        make_scatter_plot(
+            episode_rewards_list_normal_legs,
+            episode_rewards_list_long_legs,
+            episode_std_list_normal_legs,
+            episode_std_list_long_legs,
+            wandb_prefix="",
+        )
+
+        make_scatter_plot(
+            episode_rewards_list_normal_legs,
+            episode_rewards_list_normal_legs_sanity_check,
+            episode_std_list_normal_legs,
+            episode_std_list_normal_legs_sanity_check,
+            wandb_prefix=" sanity check, ",
+        )
+
+    def make_scatter_plot(x, y, error_x_vals, error_y_vals, wandb_prefix):
+        import plotly.graph_objects as go
+
+        # Fitting a straight line
+        slope, intercept = np.polyfit(x, y, 1)
+        line_y = [slope * xi + intercept for xi in x]
+
+        fig = go.Figure()
+
+        # Scatter plot with error bars
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                error_x=dict(
+                    type="data",  # Data means we provide actual values for error
+                    array=error_x_vals,
+                    visible=True,
+                ),
+                error_y=dict(type="data", array=error_y_vals, visible=True),
+                mode="markers",
+                name="return of normal legs vs long legs",
+                marker=dict(color="red", size=3),
+            )
+        )
+
+        # Straight line plot
+        fig.add_trace(
+            go.Scatter(x=x, y=line_y, mode="lines", name="Fit", line=dict(color="blue"))
+        )
+
+        fig.update_layout(
+            xaxis_title="normal legs return", yaxis_title="long legs return",
+        )
+
+        wandb.log(
+            {
+                f"visualising how population ranking changes with different leg length{wandb_prefix}slope={slope:.3f}": fig
+            }
+        )
+
     def train(
+        clipping_val: float,
         seed: int,
         wandb_prefix: str,
         bayesian_agent_to_sample: None,
         is_weight_sharing: bool,
         number_of_cell_types: int,
-        env_name: str = "ant",
+        complexity_cost: float,
+        env_name: str = "halfcheetah",
         num_envs: int = 2_048,
         episode_length: int = 1_000,
         device: str = "cuda",
         num_timesteps: int = 100_000_000,
-        eval_frequency: int = 100,
-        unroll_length: int = 5,
-        batch_size: int = 1024,
+        eval_frequency: int = 30,
+        unroll_length: int = 20,
+        batch_size: int = 512,
         num_minibatches: int = 32,
-        num_update_epochs: int = 4,
-        reward_scaling: float = 0.1,
+        num_update_epochs: int = 8,
+        reward_scaling: float = 10,
         entropy_cost: float = 1e-2,
         discounting: float = 0.97,
         learning_rate: float = 3e-4,
@@ -135,14 +323,17 @@ def main(args):
         wandb.init(
             project="brax-cshl",
             config=config,
-            dir="/grid/zador/data_norepl/augustine/wandb_logging",
+            dir="/grid/zador/data_nlsas_norepl/mavorpar/wandb_logging/wandb",
         )
+
         if bayesian_agent_to_sample is not None:
-            agent = bayesian_agent_to_sample.sample_vanilla_agent()
+            agent = bayesian_agent_to_sample.sample_vanilla_agent(
+                clipping_val, learning_rate, entropy_cost
+            )
         else:
             if is_weight_sharing == True:
                 agent = BayesianAgent(
-                    0.3,
+                    clipping_val,
                     number_of_cell_types,
                     vanilla_policy_layers,
                     vanilla_value_layers,
@@ -150,10 +341,11 @@ def main(args):
                     discounting,
                     reward_scaling,
                     device,
+                    complexity_cost,
                 )
             elif is_weight_sharing == False:
                 agent = Agent(
-                    0.3,
+                    clipping_val,
                     vanilla_policy_layers,
                     vanilla_value_layers,
                     entropy_cost,
@@ -171,18 +363,16 @@ def main(args):
         total_policy_loss = 0
         total_value_loss = 0
         total_entropy_loss = 0
+        total_kl_loss = 0
 
         for eval_i in range(eval_frequency + 1):
             if progress_fn:
-                t = time.time()
-                with torch.no_grad():
-                    episode_count, episode_reward = eval_unroll(
-                        agent, env, episode_length
-                    )
-                duration = time.time() - t
-                # TODO: only count stats from completed episodes
-                episode_avg_length = env.num_envs * episode_length / episode_count
-                eval_sps = env.num_envs * episode_length / duration
+                (
+                    episode_reward,
+                    episode_count,
+                    episode_avg_length,
+                    eval_sps,
+                ) = eval_agent(agent, env, episode_length)
                 progress = {
                     "eval/episode_reward": episode_reward,
                     "eval/completed_episodes": episode_count,
@@ -194,8 +384,9 @@ def main(args):
                     "losses/total_entropy_loss": total_entropy_loss,
                     "losses/total_loss": total_loss,
                 }
-                progress_fn(total_steps, progress, wandb_prefix)
-
+                progress_fn(
+                    total_steps, progress, wandb_prefix, logging_population=False
+                )
             if eval_i == eval_frequency:
                 break
 
@@ -239,7 +430,7 @@ def main(args):
 
                     for minibatch_i in range(num_minibatches):
                         td_minibatch = sd_map(lambda d: d[minibatch_i], epoch_td)
-                        loss, policy_loss, v_loss, entropy_loss = agent.loss(
+                        loss, policy_loss, v_loss, entropy_loss, kl_loss = agent.loss(
                             td_minibatch._asdict()
                         )
                         optimizer.zero_grad()
@@ -249,6 +440,7 @@ def main(args):
                         total_value_loss += v_loss
                         total_entropy_loss += entropy_loss
                         total_loss += loss
+                        total_kl_loss += kl_loss
 
             duration = time.time() - t
             total_steps += num_epochs * num_steps
@@ -273,31 +465,41 @@ def main(args):
     train_sps = []
     times = [datetime.now()]
 
-    def progress(num_steps, metrics, wandb_prefix):
-        times.append(datetime.now())
-        xdata.append(num_steps)
-        ydata.append(metrics["eval/episode_reward"].cpu())
-        eval_sps.append(metrics["speed/eval_sps"])
-        train_sps.append(metrics["speed/sps"])
-        wandb.log(
-            {
-                f"{wandb_prefix}_losses/total_loss": metrics["losses/total_loss"],
-                f"{wandb_prefix}_losses/total_policy_loss": metrics[
-                    "losses/total_policy_loss"
-                ],
-                f"{wandb_prefix}_losses/total_value_loss": metrics[
-                    "losses/total_value_loss"
-                ],
-                f"{wandb_prefix}_losses/total_entropy_loss": metrics[
-                    "losses/total_entropy_loss"
-                ],
-                f"{wandb_prefix}_eval/episode_reward": metrics["eval/episode_reward"],
-                f"{wandb_prefix}_speed/eval_sps": metrics["speed/eval_sps"],
-                f"{wandb_prefix}_speed/sps": metrics["speed/sps"],
-            },
-        )
+    def progress(num_steps, metrics, wandb_prefix, logging_population=True):
+        if logging_population == False:
+            wandb.log(
+                {
+                    f"{wandb_prefix}_losses/total_loss": metrics["losses/total_loss"],
+                    f"{wandb_prefix}_losses/total_policy_loss": metrics[
+                        "losses/total_policy_loss"
+                    ],
+                    f"{wandb_prefix}_losses/total_value_loss": metrics[
+                        "losses/total_value_loss"
+                    ],
+                    f"{wandb_prefix}_losses/total_entropy_loss": metrics[
+                        "losses/total_entropy_loss"
+                    ],
+                    f"{wandb_prefix}_eval/episode_reward": metrics[
+                        "eval/episode_reward"
+                    ],
+                    f"{wandb_prefix}_speed/eval_sps": metrics["speed/eval_sps"],
+                    f"{wandb_prefix}_speed/sps": metrics["speed/sps"],
+                },
+            )
+            times.append(datetime.now())
+            xdata.append(num_steps)
+            ydata.append(metrics["eval/episode_reward"].cpu())
+            eval_sps.append(metrics["speed/eval_sps"])
+            train_sps.append(metrics["speed/sps"])
+        elif logging_population == True:
+            wandb.log(
+                {"population_eval/episode_reward": metrics["eval/episode_reward"]},
+            )
+        else:
+            raise ValueError("logging_population must be a Boolean")
 
     agent = train(
+        clipping_val=(args.clipping_val),
         wandb_prefix="bayesian",
         bayesian_agent_to_sample=None,
         env_name=args.env_name,
@@ -305,10 +507,13 @@ def main(args):
         number_of_cell_types=args.number_of_cell_types,
         progress_fn=progress,
         seed=int(args.seed),
-        num_envs=int(args.number_envs),
+        num_envs=int(args.num_envs),
         batch_size=int(args.batch_size),
         learning_rate=float(args.learning_rate),
         entropy_cost=float(args.entropy_cost),
+        complexity_cost=float(args.complexity_cost),
+        num_timesteps=int(args.num_timesteps),
+        eval_frequency=int(args.num_timesteps / 2e6),
     )
 
     print(f"time to jit: {times[1] - times[0]}")
@@ -316,21 +521,38 @@ def main(args):
     print(f"eval steps/sec: {np.mean(eval_sps)}")
     print(f"train steps/sec: {np.mean(train_sps)}")
 
-    print("now doing within lifetime learning...")
+    print("now evaluating population statistics...")
 
-    agent = train(
-        wandb_prefix="within_lifeteime_learning",
-        bayesian_agent_to_sample=agent,
+    eval_population(
+        agent=agent,
+        seed=args.seed,
         env_name=args.env_name,
-        is_weight_sharing=args.is_weight_sharing,
-        number_of_cell_types=args.number_of_cell_types,
-        progress_fn=progress,
-        seed=int(args.seed),
-        num_envs=args.number_envs,
-        batch_size=args.batch_size,
+        num_envs=args.batch_size,
+        clipping_val=args.clipping_val,
         learning_rate=args.learning_rate,
         entropy_cost=args.entropy_cost,
     )
+
+    print("now doing within lifetime learning...")
+
+    if args.is_weight_sharing != False:
+        agent = train(
+            clipping_val=(args.within_lifetime_clipping_val),
+            wandb_prefix="within_lifeteime_learning",
+            bayesian_agent_to_sample=agent,
+            env_name=args.env_name,
+            is_weight_sharing=args.is_weight_sharing,
+            number_of_cell_types=args.number_of_cell_types,
+            progress_fn=progress,
+            seed=int(args.seed),
+            num_envs=int(args.num_envs),
+            batch_size=int(args.batch_size),
+            learning_rate=float(args.within_lifetime_learning_rate),
+            entropy_cost=float(args.within_lifetime_entropy_cost),
+            complexity_cost=float(args.complexity_cost),
+            num_timesteps=int(args.num_timesteps),
+            eval_frequency=int(args.num_timesteps / 2e6),
+        )
 
 
 if __name__ == "__main__":
@@ -341,8 +563,11 @@ if __name__ == "__main__":
     parser.add_argument("--seed", default=0)
     parser.add_argument("--learning_rate", default=3e-4)
     parser.add_argument("--entropy_cost", default=1e-2)
-    parser.add_argument("--number_envs", default=2048)
-    parser.add_argument("--batch_size", default=1024)
+    parser.add_argument("--num_envs", default=4096)
+    parser.add_argument("--batch_size", default=2048)
+    parser.add_argument("--num_update_epochs", default=4)
+    parser.add_argument("--num_minibatches", default=32)
+    parser.add_argument("--unroll_length", default=5)
     parser.add_argument("--number_of_cell_types", default=64)
     parser.add_argument(
         "--is_weight_sharing",
@@ -351,6 +576,12 @@ if __name__ == "__main__":
         nargs="?",
         const=True,
     )
+    parser.add_argument("--clipping_val", default=0.3, type=float)
+    parser.add_argument("--within_lifetime_clipping_val", default=0.3, type=float)
+    parser.add_argument("--within_lifetime_learning_rate", default=3e-4, type=float)
+    parser.add_argument("--within_lifetime_entropy_cost", default=1e-2, type=float)
     parser.add_argument("--env_name", default="ant")
+    parser.add_argument("--complexity_cost", type=float, default=0.0001)
+    parser.add_argument("--num_timesteps", type=int, default=1_000_000)
     args = parser.parse_args()
     main(args)
