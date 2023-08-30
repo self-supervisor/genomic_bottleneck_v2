@@ -8,6 +8,7 @@ import jax
 
 from models import Agent, BayesianAgent
 from utils import calculate_compression_ratio
+from omegaconf import OmegaConf
 
 print("jax devices", jax.devices())
 
@@ -25,13 +26,23 @@ from brax.envs.wrappers import torch as torch_wrapper
 from brax.io import metrics
 from brax.training.agents.ppo import train as ppo
 from torch import nn, optim
+import hydra
+from hydra.core.config_store import ConfigStore
+
+from omegaconf import DictConfig
+from config import TrainConfig
+
+cs = ConfigStore.instance()
+cs.store(name="default", node=TrainConfig)
 
 
-def main(args):
-    random.seed(int(args.seed))
-    torch.manual_seed(int(args.seed))
+@hydra.main(config_path=".", config_name="ant")
+def main(cfg: DictConfig):
+    random.seed(int(cfg.seed))
+    torch.manual_seed(int(cfg.seed))
 
-    config = vars(args)
+    dict_config = OmegaConf.to_container(cfg, resolve=True)
+
     StepData = collections.namedtuple(
         "StepData", ("observation", "logits", "action", "reward", "done", "truncation")
     )
@@ -77,43 +88,22 @@ def main(args):
         td = sd_map(torch.stack, sd)
         return observation, td
 
-    def train(
-        seed: int,
-        wandb_prefix: str,
-        bayesian_agent_to_sample: None,
-        is_weight_sharing: bool,
-        number_of_cell_types: int,
-        env_name: str = "ant",
-        num_envs: int = 2_048,
-        episode_length: int = 1_000,
-        device: str = "cuda",
-        num_timesteps: int = 100_000_000,
-        eval_frequency: int = 100,
-        unroll_length: int = 5,
-        batch_size: int = 1024,
-        num_minibatches: int = 32,
-        num_update_epochs: int = 4,
-        reward_scaling: float = 0.1,
-        entropy_cost: float = 1e-2,
-        discounting: float = 0.97,
-        learning_rate: float = 3e-4,
-        progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
-    ):
+    def train(cfg, bayesian_agent_to_sample, progress_function, wandb_prefix):
         """Trains a policy via PPO."""
-        number_of_cell_types = int(number_of_cell_types)
+        number_of_cell_types = int(cfg.number_of_cell_types)
         env = envs.create(
-            env_name,
-            batch_size=num_envs,
-            episode_length=episode_length,
+            cfg.env_name,
+            batch_size=cfg.num_envs,
+            episode_length=cfg.episode_length,
             backend="spring",
         )
-        env = gym_wrapper.VectorGymWrapper(env, seed=seed)
+        env = gym_wrapper.VectorGymWrapper(env, seed=cfg.seed)
         # automatically convert between jax ndarrays and torch tensors:
-        env = torch_wrapper.TorchWrapper(env, device=device)
+        env = torch_wrapper.TorchWrapper(env, device=cfg.device)
 
         # env warmup
         env.reset()
-        action = torch.zeros(env.action_space.shape).to(device)
+        action = torch.zeros(env.action_space.shape).to(cfg.device)
         env.step(action)
 
         # create the agent
@@ -130,40 +120,44 @@ def main(args):
             vanilla_value_layers,
             number_of_cell_types=number_of_cell_types,
         )
-        config["compression_ratio"] = compression_ratio
+        dict_config["compression_ratio"] = compression_ratio
 
         wandb.init(
             project="brax-cshl",
-            config=config,
-            dir="/grid/zador/data_norepl/augustine/wandb_logging",
+            config=dict_config,
+            dir="/grid/zador/data_nlsas_norepl/augustine/wandb_logging",
         )
+
         if bayesian_agent_to_sample is not None:
-            agent = bayesian_agent_to_sample.sample_vanilla_agent()
+            agent = bayesian_agent_to_sample.sample_vanilla_agent(
+                cfg.clipping_val, cfg.learning_rate, cfg.entropy_cost
+            )
         else:
-            if is_weight_sharing == True:
+            if cfg.is_weight_sharing == True:
                 agent = BayesianAgent(
-                    0.3,
+                    cfg.clipping_val,
                     number_of_cell_types,
                     vanilla_policy_layers,
                     vanilla_value_layers,
-                    entropy_cost,
-                    discounting,
-                    reward_scaling,
-                    device,
+                    cfg.entropy_cost,
+                    cfg.discounting,
+                    cfg.reward_scaling,
+                    cfg.device,
+                    cfg.complexity_cost,
                 )
-            elif is_weight_sharing == False:
+            elif cfg.is_weight_sharing == False:
                 agent = Agent(
-                    0.3,
+                    cfg.clipping_val,
                     vanilla_policy_layers,
                     vanilla_value_layers,
-                    entropy_cost,
-                    discounting,
-                    reward_scaling,
-                    device,
+                    cfg.entropy_cost,
+                    cfg.discounting,
+                    cfg.reward_scaling,
+                    cfg.device,
                 )
 
-        agent = agent.to(device)
-        optimizer = optim.Adam(agent.parameters(), lr=learning_rate)
+        agent = agent.to(cfg.device)
+        optimizer = optim.Adam(agent.parameters(), lr=cfg.learning_rate)
 
         sps = 0
         total_steps = 0
@@ -171,18 +165,19 @@ def main(args):
         total_policy_loss = 0
         total_value_loss = 0
         total_entropy_loss = 0
+        total_kl_loss = 0
 
-        for eval_i in range(eval_frequency + 1):
-            if progress_fn:
+        for eval_i in range(cfg.eval_frequency + 1):
+            if progress_function:
                 t = time.time()
                 with torch.no_grad():
                     episode_count, episode_reward = eval_unroll(
-                        agent, env, episode_length
+                        agent, env, cfg.episode_length
                     )
                 duration = time.time() - t
                 # TODO: only count stats from completed episodes
-                episode_avg_length = env.num_envs * episode_length / episode_count
-                eval_sps = env.num_envs * episode_length / duration
+                episode_avg_length = env.num_envs * cfg.episode_length / episode_count
+                eval_sps = env.num_envs * cfg.episode_length / duration
                 progress = {
                     "eval/episode_reward": episode_reward,
                     "eval/completed_episodes": episode_count,
@@ -194,20 +189,20 @@ def main(args):
                     "losses/total_entropy_loss": total_entropy_loss,
                     "losses/total_loss": total_loss,
                 }
-                progress_fn(total_steps, progress, wandb_prefix)
+                progress_function(total_steps, progress, wandb_prefix)
 
-            if eval_i == eval_frequency:
+            if eval_i == cfg.eval_frequency:
                 break
 
             observation = env.reset()
-            num_steps = batch_size * num_minibatches * unroll_length
-            num_epochs = num_timesteps // (num_steps * eval_frequency)
-            num_unrolls = batch_size * num_minibatches // env.num_envs
+            num_steps = cfg.batch_size * cfg.num_minibatches * cfg.unroll_length
+            num_epochs = cfg.num_timesteps // (num_steps * cfg.eval_frequency)
+            num_unrolls = cfg.batch_size * cfg.num_minibatches // env.num_envs
             total_loss = 0
             t = time.time()
             for _ in range(num_epochs):
                 observation, td = train_unroll(
-                    agent, env, observation, num_unrolls, unroll_length
+                    agent, env, observation, num_unrolls, cfg.unroll_length
                 )
 
                 # make unroll first
@@ -220,26 +215,26 @@ def main(args):
                 # update normalization statistics
                 agent.update_normalization(td.observation)
 
-                for _ in range(num_update_epochs):
+                for _ in range(cfg.num_update_epochs):
                     # shuffle and batch the data
                     with torch.no_grad():
                         permutation = torch.randperm(
-                            td.observation.shape[1], device=device
+                            td.observation.shape[1], device=cfg.device
                         )
 
                         def shuffle_batch(data):
                             data = data[:, permutation]
                             data = data.reshape(
-                                [data.shape[0], num_minibatches, -1]
+                                [data.shape[0], cfg.num_minibatches, -1]
                                 + list(data.shape[2:])
                             )
                             return data.swapaxes(0, 1)
 
                         epoch_td = sd_map(shuffle_batch, td)
 
-                    for minibatch_i in range(num_minibatches):
+                    for minibatch_i in range(cfg.num_minibatches):
                         td_minibatch = sd_map(lambda d: d[minibatch_i], epoch_td)
-                        loss, policy_loss, v_loss, entropy_loss = agent.loss(
+                        loss, policy_loss, v_loss, entropy_loss, kl_loss = agent.loss(
                             td_minibatch._asdict()
                         )
                         optimizer.zero_grad()
@@ -249,18 +244,21 @@ def main(args):
                         total_value_loss += v_loss
                         total_entropy_loss += entropy_loss
                         total_loss += loss
+                        total_kl_loss += kl_loss
 
             duration = time.time() - t
             total_steps += num_epochs * num_steps
-            total_loss = total_loss / (num_epochs * num_update_epochs * num_minibatches)
+            total_loss = total_loss / (
+                num_epochs * cfg.num_update_epochs * cfg.num_minibatches
+            )
             total_entropy_loss = total_entropy_loss / (
-                num_epochs * num_update_epochs * num_minibatches
+                num_epochs * cfg.num_update_epochs * cfg.num_minibatches
             )
             total_policy_loss = total_policy_loss / (
-                num_epochs * num_update_epochs * num_minibatches
+                num_epochs * cfg.num_update_epochs * cfg.num_minibatches
             )
             total_value_loss = total_value_loss / (
-                num_epochs * num_update_epochs * num_minibatches
+                num_epochs * cfg.num_update_epochs * cfg.num_minibatches
             )
             sps = num_epochs * num_steps / duration
         return agent
@@ -298,17 +296,10 @@ def main(args):
         )
 
     agent = train(
-        wandb_prefix="bayesian",
+        cfg,
         bayesian_agent_to_sample=None,
-        env_name=args.env_name,
-        is_weight_sharing=args.is_weight_sharing,
-        number_of_cell_types=args.number_of_cell_types,
-        progress_fn=progress,
-        seed=int(args.seed),
-        num_envs=int(args.number_envs),
-        batch_size=int(args.batch_size),
-        learning_rate=float(args.learning_rate),
-        entropy_cost=float(args.entropy_cost),
+        progress_function=progress,
+        wandb_prefix="evolutionary_learning",
     )
 
     print(f"time to jit: {times[1] - times[0]}")
@@ -318,39 +309,14 @@ def main(args):
 
     print("now doing within lifetime learning...")
 
-    agent = train(
-        wandb_prefix="within_lifeteime_learning",
-        bayesian_agent_to_sample=agent,
-        env_name=args.env_name,
-        is_weight_sharing=args.is_weight_sharing,
-        number_of_cell_types=args.number_of_cell_types,
-        progress_fn=progress,
-        seed=int(args.seed),
-        num_envs=args.number_envs,
-        batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-        entropy_cost=args.entropy_cost,
-    )
+    if cfg.is_weight_sharing != False:
+        agent = train(
+            cfg,
+            bayesian_agent_to_sample=agent,
+            progress_function=progress,
+            wandb_prefix="within_lifetime_learning",
+        )
 
 
 if __name__ == "__main__":
-    import argparse
-    from distutils.util import strtobool
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", default=0)
-    parser.add_argument("--learning_rate", default=3e-4)
-    parser.add_argument("--entropy_cost", default=1e-2)
-    parser.add_argument("--number_envs", default=2048)
-    parser.add_argument("--batch_size", default=1024)
-    parser.add_argument("--number_of_cell_types", default=64)
-    parser.add_argument(
-        "--is_weight_sharing",
-        type=lambda x: bool(strtobool(x)),
-        default=True,
-        nargs="?",
-        const=True,
-    )
-    parser.add_argument("--env_name", default="ant")
-    args = parser.parse_args()
-    main(args)
+    main()
