@@ -2,15 +2,16 @@
 
 #$ -cwd
 #$ -j y
-#$ -t 1-10
+#$ -t 1-30
 #$ -o cheetah_fix
 #$ -e cheetah_fix
 #$ -N cheetah_fix
 #$ -l gpu=1
 
-CONFIG_NAMES=("halfcheetah_vanilla" "ant_vanilla")  # Add as many config names as you have
+
+CONFIG_NAMES=("halfcheetah")  # Add as many config names as you have
 SEEDS=(0 1 2 3 4)  # Adjust the seed range as you need
-NUM_CELL_TYPES=(1)  # Adjust as per your requirement
+NUM_CELL_TYPES=(128 64 32 16 8)  # Adjust as per your requirement
 
 # Calculate indices for array job
 CONFIG_INDEX=$((($SGE_TASK_ID-1)/(${#SEEDS[@]}*${#NUM_CELL_TYPES[@]})))

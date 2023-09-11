@@ -109,11 +109,11 @@ def main(cfg: DictConfig):
         # create the agent
         vanilla_policy_layers = [
             env.observation_space.shape[-1],
-            64,
-            64,
+            128,
+            128,
             env.action_space.shape[-1] * 2,
         ]
-        vanilla_value_layers = [env.observation_space.shape[-1], 64, 64, 1]
+        vanilla_value_layers = [env.observation_space.shape[-1], 128, 128, 1]
         compression_ratio = calculate_compression_ratio(
             env,
             vanilla_policy_layers,
