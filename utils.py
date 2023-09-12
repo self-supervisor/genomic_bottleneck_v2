@@ -49,6 +49,21 @@ def to1d_CNN(a, x, y, z, out_channel, in_channel, num_out, num_inp):
     )
 
 
+def scale_scores(your_score, min_score, max_score):
+    """
+    Scale a score to the range [0, 1] using the minimum and maximum possible scores.
+
+    Parameters:
+    - your_score: your score
+    - min_score: the minimum possible score
+    - max_score: the maximum possible score
+
+    Returns:
+    - The scaled score
+    """
+    return (your_score - min_score) / (max_score - min_score)
+
+
 # def gather2D(tensor, indices):
 
 #     old_shape = indices.shape[:-1]

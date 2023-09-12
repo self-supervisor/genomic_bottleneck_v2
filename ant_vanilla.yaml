@@ -19,3 +19,4 @@ num_timesteps: 100000000
 eval_frequency: 20
 reward_scaling: 0.1
 discounting: 0.97
+hidden_size: 64

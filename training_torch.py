@@ -109,11 +109,16 @@ def main(cfg: DictConfig):
         # create the agent
         vanilla_policy_layers = [
             env.observation_space.shape[-1],
-            128,
-            128,
+            cfg.hidden_size,
+            cfg.hidden_size,
             env.action_space.shape[-1] * 2,
         ]
-        vanilla_value_layers = [env.observation_space.shape[-1], 128, 128, 1]
+        vanilla_value_layers = [
+            env.observation_space.shape[-1],
+            cfg.hidden_size,
+            cfg.hidden_size,
+            1,
+        ]
         compression_ratio = calculate_compression_ratio(
             env,
             vanilla_policy_layers,
@@ -157,6 +162,8 @@ def main(cfg: DictConfig):
                 )
 
         agent = agent.to(cfg.device)
+        num_of_params = sum(p.numel() for p in agent.parameters() if p.requires_grad)
+
         optimizer = optim.Adam(agent.parameters(), lr=cfg.learning_rate)
 
         sps = 0
@@ -261,7 +268,14 @@ def main(cfg: DictConfig):
                 num_epochs * cfg.num_update_epochs * cfg.num_minibatches
             )
             sps = num_epochs * num_steps / duration
-        return agent
+            proportion_of_max_score = (
+                (episode_reward - cfg.min_performance)
+                / (cfg.SOTA_performance - cfg.min_performance),
+            )
+        wandb.log(
+            {f"{wandb_prefix}_percentage_of_SOTA_reward": proportion_of_max_score}
+        )
+        return agent, num_of_params
 
     os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
@@ -295,7 +309,7 @@ def main(cfg: DictConfig):
             },
         )
 
-    agent = train(
+    agent, num_params_evolutionary = train(
         cfg,
         bayesian_agent_to_sample=None,
         progress_function=progress,
@@ -310,12 +324,21 @@ def main(cfg: DictConfig):
     print("now doing within lifetime learning...")
 
     if cfg.is_weight_sharing != False:
-        agent = train(
+        cfg.num_timesteps = cfg.num_timesteps * 2
+        cfg.eval_frequency = cfg.eval_frequency * 2
+        agent, num_params_within_lifetime = train(
             cfg,
             bayesian_agent_to_sample=agent,
             progress_function=progress,
             wandb_prefix="within_lifetime_learning",
         )
+
+    wandb.log(
+        {
+            "pytorch_reported_compression": num_params_within_lifetime
+            / num_params_evolutionary
+        }
+    )
 
 
 if __name__ == "__main__":
