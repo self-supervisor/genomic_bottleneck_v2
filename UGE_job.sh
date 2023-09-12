@@ -23,4 +23,4 @@ SEED=${SEEDS[$SEED_INDEX]}
 CELL_TYPE=${NUM_CELL_TYPES[$CELL_INDEX]}
 
 # Now call your python script with these parameters
-python training_torch.py config-name=$CONFIG_NAME seed=$SEED number_of_cell_types=$CELL_TYPE hidden_size=64
+python training_torch.py --config-name=$CONFIG_NAME seed=$SEED number_of_cell_types=$CELL_TYPE hidden_size=64

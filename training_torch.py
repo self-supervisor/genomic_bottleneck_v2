@@ -2,7 +2,7 @@ import collections
 import os
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import jax
 
@@ -36,12 +36,26 @@ cs = ConfigStore.instance()
 cs.store(name="default", node=TrainConfig)
 
 
+def write_to_csv(
+    *, cfg_to_log: dict, wandb_prefix: str, path: str = "csv_logs/"
+) -> None:
+    """Write the config and final reward to a csv file."""
+    if not os.path.exists(path):
+        os.makedirs(path)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    file_path = os.path.join(path, f"{wandb_prefix}_{timestamp}.csv")
+    with open(file_path, "a") as f:
+        f.write(",".join([str(v) for v in cfg_to_log.values()]) + "\n")
+
+
 @hydra.main(config_path=".", config_name="ant")
-def main(cfg: DictConfig):
+def main(cfg: DictConfig) -> None:
+    np.random.seed(cfg.seed)
     random.seed(int(cfg.seed))
     torch.manual_seed(int(cfg.seed))
 
     dict_config = OmegaConf.to_container(cfg, resolve=True)
+    cfg_to_log = dict(cfg)
 
     StepData = collections.namedtuple(
         "StepData", ("observation", "logits", "action", "reward", "done", "truncation")
@@ -55,7 +69,7 @@ def main(cfg: DictConfig):
             items[k] = f(*[sd._asdict()[k] for sd in sds])
         return StepData(**items)
 
-    def eval_unroll(agent, env, length):
+    def eval_unroll(agent, env, length) -> Tuple[int, float]:
         """Return number of episodes and average reward for a single unroll."""
         observation = env.reset()
         episodes = torch.zeros((), device=agent.device)
@@ -88,7 +102,7 @@ def main(cfg: DictConfig):
         td = sd_map(torch.stack, sd)
         return observation, td
 
-    def train(cfg, bayesian_agent_to_sample, progress_function, wandb_prefix):
+    def train(*, cfg, bayesian_agent_to_sample, progress_function, wandb_prefix):
         """Trains a policy via PPO."""
         number_of_cell_types = int(cfg.number_of_cell_types)
         env = envs.create(
@@ -275,6 +289,10 @@ def main(cfg: DictConfig):
         wandb.log(
             {f"{wandb_prefix}_percentage_of_SOTA_reward": proportion_of_max_score}
         )
+        cfg_to_log["proportion_of_max_score"] = proportion_of_max_score
+        write_to_csv(
+            cfg_to_log=cfg_to_log, wandb_prefix=wandb_prefix,
+        )
         return agent, num_of_params
 
     os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
@@ -310,7 +328,7 @@ def main(cfg: DictConfig):
         )
 
     agent, num_params_evolutionary = train(
-        cfg,
+        cfg=cfg,
         bayesian_agent_to_sample=None,
         progress_function=progress,
         wandb_prefix="evolutionary_learning",
