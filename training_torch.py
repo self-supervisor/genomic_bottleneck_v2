@@ -36,15 +36,17 @@ cs = ConfigStore.instance()
 cs.store(name="default", node=TrainConfig)
 
 
-def write_to_csv(
-    *, cfg_to_log: dict, wandb_prefix: str, path: str = "csv_logs/"
-) -> None:
+def write_to_csv(*, cfg_to_log: dict, path: str = "csv_logs/") -> None:
     """Write the config and final reward to a csv file."""
     if not os.path.exists(path):
         os.makedirs(path)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    file_path = os.path.join(path, f"{wandb_prefix}_{timestamp}.csv")
+    file_path = os.path.join(path, f"{timestamp}.csv")
+
+    assert not os.path.exists(file_path)
+
     with open(file_path, "a") as f:
+        f.write(",".join([str(k) for k in cfg_to_log.keys()]) + "\n")
         f.write(",".join([str(v) for v in cfg_to_log.values()]) + "\n")
 
 
@@ -102,7 +104,7 @@ def main(cfg: DictConfig) -> None:
         td = sd_map(torch.stack, sd)
         return observation, td
 
-    def train(*, cfg, bayesian_agent_to_sample, progress_function, wandb_prefix):
+    def train(cfg, bayesian_agent_to_sample, progress_function, wandb_prefix):
         """Trains a policy via PPO."""
         number_of_cell_types = int(cfg.number_of_cell_types)
         env = envs.create(
@@ -282,18 +284,25 @@ def main(cfg: DictConfig) -> None:
                 num_epochs * cfg.num_update_epochs * cfg.num_minibatches
             )
             sps = num_epochs * num_steps / duration
-            proportion_of_max_score = (
-                (episode_reward - cfg.min_performance)
-                / (cfg.SOTA_performance - cfg.min_performance),
+        if "within_lifetime" not in wandb_prefix:
+            percentage_of_SOTA_reward = (
+                (
+                    (episode_reward - cfg.min_performance)
+                    / (cfg.SOTA_performance - cfg.min_performance)
+                )
+                .detach()
+                .cpu()
+                .numpy()
+                .item()
             )
-        wandb.log(
-            {f"{wandb_prefix}_percentage_of_SOTA_reward": proportion_of_max_score}
-        )
-        cfg_to_log["proportion_of_max_score"] = proportion_of_max_score
-        write_to_csv(
-            cfg_to_log=cfg_to_log, wandb_prefix=wandb_prefix,
-        )
-        return agent, num_of_params
+            wandb.log(
+                {f"{wandb_prefix}_percentage_of_SOTA_reward": percentage_of_SOTA_reward}
+            )
+            cfg_to_log["compression_ratio"] = compression_ratio
+        else:
+            percentage_of_SOTA_reward = None
+
+        return agent, num_of_params, percentage_of_SOTA_reward
 
     os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
@@ -327,7 +336,7 @@ def main(cfg: DictConfig) -> None:
             },
         )
 
-    agent, num_params_evolutionary = train(
+    agent, num_params_evolutionary, percentage_of_SOTA_reward = train(
         cfg=cfg,
         bayesian_agent_to_sample=None,
         progress_function=progress,
@@ -344,7 +353,7 @@ def main(cfg: DictConfig) -> None:
     if cfg.is_weight_sharing != False:
         cfg.num_timesteps = cfg.num_timesteps * 2
         cfg.eval_frequency = cfg.eval_frequency * 2
-        agent, num_params_within_lifetime = train(
+        agent, num_params_within_lifetime, _ = train(
             cfg,
             bayesian_agent_to_sample=agent,
             progress_function=progress,
@@ -357,6 +366,10 @@ def main(cfg: DictConfig) -> None:
             / num_params_evolutionary
         }
     )
+
+    cfg_to_log["proportion_of_max_score"] = percentage_of_SOTA_reward
+    cfg_to_log["num_params_evolutionary"] = num_params_evolutionary
+    write_to_csv(cfg_to_log=cfg_to_log)
 
 
 if __name__ == "__main__":

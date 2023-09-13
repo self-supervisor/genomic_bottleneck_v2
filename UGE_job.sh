@@ -10,7 +10,7 @@
 
 CONFIG_NAMES=("halfcheetah" "ant")  # Add as many config names as you have
 SEEDS=(0 1 2 3 4)  # Adjust the seed range as you need
-NUM_CELL_TYPES=(64 32 16 8 4)  # Adjust as per your requirement
+NUM_CELL_TYPES=(64 48 32 16 8)  # Adjust as per your requirement
 
 # Calculate indices for array job
 CONFIG_INDEX=$((($SGE_TASK_ID-1)/(${#SEEDS[@]}*${#NUM_CELL_TYPES[@]})))
