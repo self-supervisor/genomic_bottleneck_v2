@@ -10,7 +10,7 @@
 
 CONFIG_NAMES=("halfcheetah" "ant")  # Add as many config names as you have
 SEEDS=(0 1 2 3 4)  # Adjust the seed range as you need
-NUM_CELL_TYPES=(64 48 32 16 8)  # Adjust as per your requirement
+NUM_CELL_TYPES=(128 64 48 32 16)  # Adjust as per your requirement
 
 # Calculate indices for array job
 CONFIG_INDEX=$((($SGE_TASK_ID-1)/(${#SEEDS[@]}*${#NUM_CELL_TYPES[@]})))
@@ -23,4 +23,4 @@ SEED=${SEEDS[$SEED_INDEX]}
 CELL_TYPE=${NUM_CELL_TYPES[$CELL_INDEX]}
 
 # Now call your python script with these parameters
-python training_torch.py --config-name=$CONFIG_NAME seed=$SEED number_of_cell_types=$CELL_TYPE hidden_size=64
+python training_torch.py --config-name=$CONFIG_NAME seed=$SEED number_of_cell_types=$CELL_TYPE hidden_size=128

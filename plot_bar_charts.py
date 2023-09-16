@@ -25,7 +25,13 @@ def get_grouped_statistics(
 
 
 def plot_scatter_chart(
-    *, means: pd.Series, sems: pd.Series, x_label: str, y_label: str, title: str
+    *,
+    means: pd.Series,
+    sems: pd.Series,
+    x_label: str,
+    y_label: str,
+    title: str,
+    save_name: str,
 ) -> None:
     # Set style
     plt.style.use("seaborn-darkgrid")
@@ -60,12 +66,14 @@ def plot_scatter_chart(
     plt.grid(axis="y", linewidth=0.5)
 
     # Set dpi to a higher value for a higher resolution output
-    plt.savefig("scatter_plot.png", dpi=300)
+    plt.savefig(f"{save_name}.png", dpi=300)
 
 
 def main() -> None:
-    start_time = "2023-09-12 18:00:00"
-    end_time = "2023-09-13 05:00:00"
+    start_time = "2023-09-13 12:00:00"
+    end_time = "2023-09-14 23:00:00"
+    env_name = "halfcheetah"
+    hidden_size = 128
 
     start_time = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
     end_time = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
@@ -75,11 +83,10 @@ def main() -> None:
 
     for file_path in file_paths:
         file_time = get_timestamp_from_filename(filename=file_path)
-
         if start_time <= file_time <= end_time:
             data = pd.read_csv(file_path)
             filtered_data = filter_data(
-                data=data, hidden_size=64, env_name="halfcheetah"
+                data=data, hidden_size=hidden_size, env_name=env_name
             )
             data_frames.append(filtered_data)
 
@@ -92,9 +99,10 @@ def main() -> None:
     plot_scatter_chart(
         means=means,
         sems=sems,
-        x_label="Compression Ratio",
-        y_label="Percentage of SOTA Reward",
-        title="Scatter Chart with SEM Error Bars",
+        x_label="Number of Cell Types",
+        y_label="Proportion of Vanilla Agent Reward",
+        title=f"Zero-Shot Performance on {env_name}\nFor Different Numbers of Cell Types",
+        save_name=f"zero_shot_scatter_plot_{env_name}_{hidden_size}",
     )
 
 
