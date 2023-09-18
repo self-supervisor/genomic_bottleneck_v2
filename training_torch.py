@@ -2,7 +2,7 @@ import collections
 import os
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, List
 
 import jax
 
@@ -24,10 +24,12 @@ from brax import envs
 from brax.envs.wrappers import gym as gym_wrapper
 from brax.envs.wrappers import torch as torch_wrapper
 from brax.io import metrics
+from brax.io import torch as brax_torch
 from brax.training.agents.ppo import train as ppo
 from torch import nn, optim
 from tqdm import tqdm
 from utils import make_legs_longer
+from brax.spring.base import State, Transform, Motion
 
 
 def main(args):
@@ -47,16 +49,61 @@ def main(args):
             items[k] = f(*[sd._asdict()[k] for sd in sds])
         return StepData(**items)
 
-    def eval_unroll(agent, env, length):
+    def make_one_state(state: State):
+        from jaxlib.xla_extension import ArrayImpl
+
+        new_state_dict = {}
+        for key in state.__dict__.keys():
+            if type(state.__dict__[key]) == Transform:
+                new_transform = Transform(
+                    pos=state.__dict__[key].pos[0], rot=state.__dict__[key].rot[0],
+                )
+                new_state_dict[key] = new_transform
+            elif type(state.__dict__[key]) == ArrayImpl:
+                new_jnp_array = state.__dict__[key][0]
+                new_state_dict[key] = new_jnp_array
+            elif type(state.__dict__[key]) == Motion:
+                new_motion = Motion(
+                    ang=state.__dict__[key].ang[0], vel=state.__dict__[key].vel[0],
+                )
+                new_state_dict[key] = new_motion
+            elif state.__dict__[key] == None:
+                new_state_dict[key] = None
+            else:
+                raise ValueError("Uknown type in state class", key)
+        return State(**new_state_dict)
+
+    def extract_one_trajectory(rollout: List[State]) -> List[State]:
+        new_rollout = []
+        for i in range(len(rollout)):
+            new_rollout.append(make_one_state(rollout[i]))
+        return new_rollout
+
+    def save_rollout_to_html(env, rollout: List[State], html_name: str = None) -> None:
+
+        if html_name != None:
+            from brax.io import html
+
+            rollout = extract_one_trajectory(rollout=rollout)
+            html_path = f"trajectory_{html_name}.html"
+            html_data = html.render(sys=env.env._env.sys, states=rollout)
+            with open(html_path, "w") as f:
+                f.write(html_data)
+
+    def eval_unroll(agent, env, length, html_name: str = None):
         """Return number of episodes and average reward for a single unroll."""
         observation = env.reset()
         episodes = torch.zeros((), device=agent.device)
         episode_reward = torch.zeros((), device=agent.device)
+        rollout = []
         for _ in range(length):
+            rollout.append(env.env._state.pipeline_state)
             _, action = agent.get_logits_action(observation)
             observation, reward, done, _ = env.step(Agent.dist_postprocess(action))
             episodes += torch.sum(done)
             episode_reward += torch.sum(reward)
+
+        save_rollout_to_html(env, rollout=rollout, html_name=html_name)
         return episodes, episode_reward / episodes
 
     def train_unroll(agent, env, observation, num_unrolls, unroll_length):
@@ -80,10 +127,12 @@ def main(args):
         td = sd_map(torch.stack, sd)
         return observation, td
 
-    def eval_agent(agent, env, episode_length):
+    def eval_agent(agent, env, episode_length, html_name: str = None):
         t = time.time()
         with torch.no_grad():
-            episode_count, episode_reward = eval_unroll(agent, env, episode_length)
+            episode_count, episode_reward = eval_unroll(
+                agent, env, episode_length, html_name
+            )
         duration = time.time() - t
         episode_avg_length = env.num_envs * episode_length / episode_count
         eval_sps = env.num_envs * episode_length / duration
@@ -149,21 +198,21 @@ def main(args):
 
         mean_agent = agent.sample_mean_agent(clipping_val, learning_rate, entropy_cost)
         mean_agent_reward_normal_legs, _, _, _ = eval_agent(
-            mean_agent, env, episode_length
+            mean_agent, env, episode_length, html_name="short"
         )
         mean_agent_reward_long_legs, _, _, _ = eval_agent(
-            mean_agent, env_long_legs, episode_length
+            mean_agent, env_long_legs, episode_length, html_name="long"
         )
 
         make_legs_longer(length_adjustment=1.0)
-        for _ in tqdm(range(100)):
+        for i in tqdm(range(100)):
             sampled_agent = agent.sample_vanilla_agent(
                 clipping_val, learning_rate, entropy_cost
             )
             current_agent_returns_normal_legs = []
             current_agent_returns_normal_legs_sanity_check = []
             current_agent_returns_long_legs = []
-            for _ in range(10):
+            for _ in tqdm(range(10)):
                 episode_reward, _, _, _ = eval_agent(sampled_agent, env, episode_length)
                 current_agent_returns_normal_legs.append(episode_reward.cpu().numpy())
 
@@ -213,7 +262,6 @@ def main(args):
             episode_std_list_long_legs,
             wandb_prefix="",
         )
-
         make_scatter_plot(
             episode_rewards_list_normal_legs,
             episode_rewards_list_normal_legs_sanity_check,
@@ -582,6 +630,6 @@ if __name__ == "__main__":
     parser.add_argument("--within_lifetime_entropy_cost", default=1e-2, type=float)
     parser.add_argument("--env_name", default="ant")
     parser.add_argument("--complexity_cost", type=float, default=0.0001)
-    parser.add_argument("--num_timesteps", type=int, default=1_000_000)
+    parser.add_argument("--num_timesteps", type=int, default=50_000_000)
     args = parser.parse_args()
     main(args)
