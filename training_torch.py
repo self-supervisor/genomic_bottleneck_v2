@@ -205,6 +205,7 @@ def main(args):
         )
 
         make_legs_longer(length_adjustment=1.0)
+
         for i in tqdm(range(100)):
             sampled_agent = agent.sample_vanilla_agent(
                 clipping_val, learning_rate, entropy_cost

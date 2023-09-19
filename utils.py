@@ -332,7 +332,7 @@ def ant_at_scale(scale=1.0):
         <geom conaffinity="1" condim="3" material="MatPlane" name="floor" pos="0 0 0" size="40 40 40" type="plane"/>
         <body name="torso" pos="0 0 0.75">
           <camera name="track" mode="trackcom" pos="0 -3 0.3" xyaxes="1 0 0 0 0 1"/>
-          <geom name="torso_geom" pos="0 0 0" size="0.5" type="sphere" mass="2.0" />
+          <geom name="torso_geom" pos="0 0 0" size="0.25" type="sphere" mass="1.0" />
           <joint armature="0" damping="0" limited="false" margin="0.01" name="root" pos="0 0 0" type="free"/>
           <body name="front_left_leg" pos="0 0 0">
             <geom fromto="0.0 0.0 0.0 {scale * 0.2} {scale * 0.2} 0.0" name="aux_1_geom" size="0.08" type="capsule"/>

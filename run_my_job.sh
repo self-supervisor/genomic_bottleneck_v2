@@ -47,6 +47,23 @@
 # # Run the Python script with these parameters
 # python training_torch.py --complexity_cost $complexity_cost --env_name $env_name --is_weight_sharing True --seed $seed --number_of_cell_types $number_of_cell_types
 # Define lists
+<<<<<<< Updated upstream
+=======
+
+# Hyperparameters for halfcheetah
+num_timesteps=300000000
+eval_frequency=100
+reward_scaling=1
+episode_length=1000
+unroll_length=20
+num_minibatches=32
+num_updates_per_batch=8
+discounting=0.95
+learning_rate=3e-4
+entropy_cost=0.001
+num_envs=2048
+batch_size=512
+>>>>>>> Stashed changes
 seed_list=(1 2 3 4 5)
 number_of_cell_types_list=(64 32 16 8 4 2)
 
@@ -62,4 +79,8 @@ seed=${seed_list[$seed_idx]}
 number_of_cell_types=${number_of_cell_types_list[$number_of_cell_types_idx]}
 
 # Run the command
+<<<<<<< Updated upstream
 python training_torch.py --complexity_cost 0.0001 --env_name halfcheetah --is_weight_sharing True --seed $seed --number_of_cell_types $number_of_cell_types
+=======
+python training_torch.py --complexity_cost 0.0 --env_name halfcheetah --is_weight_sharing True --seed $seed --number_of_cell_types $number_of_cell_types
+>>>>>>> Stashed changes
