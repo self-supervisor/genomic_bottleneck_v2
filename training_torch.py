@@ -372,7 +372,7 @@ def main(args):
         wandb.init(
             project="brax-cshl",
             config=config,
-            dir="/grid/zador/data_nlsas_norepl/mavorpar/wandb_logging/wandb",
+            dir="/grid/zador/mavorpar/wandb_logging",
         )
 
         if bayesian_agent_to_sample is not None:
