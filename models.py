@@ -395,6 +395,53 @@ class BayesianAgent(nn.Module):
             kl_loss,
         )
 
+    def sample_mean_agent(
+        self, clipping_val: float, learning_rate: float, entropy_cost: float
+    ):
+        self.learning_rate = learning_rate
+        self.entropy_cost = entropy_cost
+        policy_layers = []
+        value_layers = []
+        for a_layer in self.policy:
+            if type(a_layer) == BayesianLinear:
+                policy_layers.append(
+                    self.construct_vanilla_layer(
+                        a_layer.weight_sampler.mu[0].T, a_layer.bias_sampler.mu
+                    )
+                )
+                policy_layers.append(nn.SiLU())
+        for a_layer in self.value:
+            if type(a_layer) == BayesianLinear:
+                value_layers.append(
+                    self.construct_vanilla_layer(
+                        a_layer.weight_sampler.mu[0].T, a_layer.bias_sampler.mu
+                    )
+                )
+                value_layers.append(nn.SiLU())
+        policy_layers.pop()
+        value_layers.pop()
+        policy_layer_widths = [
+            layer.in_features for layer in policy_layers if type(layer) == nn.Linear
+        ]
+        value_layer_widths = [
+            layer.in_features for layer in value_layers if type(layer) == nn.Linear
+        ]
+        vanilla_agent = Agent(
+            clipping_val,
+            policy_layer_widths,
+            value_layer_widths,
+            self.entropy_cost,
+            self.discounting,
+            self.reward_scaling,
+            self.device,
+        )
+        vanilla_agent.policy = torch.nn.Sequential(*policy_layers)
+        vanilla_agent.value = torch.nn.Sequential(*value_layers)
+        vanilla_agent.running_mean = self.running_mean
+        vanilla_agent.running_variance = self.running_variance
+        vanilla_agent.num_steps = self.num_steps
+        return vanilla_agent
+
     def sample_vanilla_agent(
         self, clipping_val: float, learning_rate: float, entropy_cost: float
     ):
@@ -447,3 +494,45 @@ class BayesianAgent(nn.Module):
         layer.weight.data = weights
         layer.bias.data = biases
         return layer
+
+
+# import flax.linen as nn
+# from flax.linen.initializers import normal
+
+
+# class AgentNetworkFlax(nn.Module):
+#     def setup(self):
+#         # Policy Network
+#         self.policy_net = nn.Sequential(
+#             [
+#                 nn.Dense(features=64, kernel_init=normal()),
+#                 nn.silu,
+#                 nn.Dense(features=64, kernel_init=normal()),
+#                 nn.silu,
+#                 nn.Dense(features=16, kernel_init=normal()),
+#             ]
+#         )
+#         # Value Network
+#         self.value_net = nn.Sequential(
+#             [
+#                 nn.Dense(features=64, kernel_init=normal()),
+#                 nn.silu,
+#                 nn.Dense(features=64, kernel_init=normal()),
+#                 nn.silu,
+#                 nn.Dense(features=1, kernel_init=normal()),
+#             ]
+#         )
+
+#     def __call__(self, x):
+#         policy = self.policy_net(x)
+#         value = self.value_net(x)
+#         return policy, value
+
+
+# Usage example (assuming input_dim is the dimensionality of your input data)
+# import jax
+# key = jax.random.PRNGKey(0)
+# x = jax.random.normal(key, (1, 27))
+# model = YourModel()
+# params = model.init(key, x)
+# print(model.apply(params, x))
