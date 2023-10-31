@@ -269,9 +269,6 @@ def calculate_compression_ratio(
     vanilla_value_layers: List[int],
     number_of_cell_types: int,
 ) -> float:
-    import ipdb
-
-    ipdb.set_trace()
     number_of_vanilla_policy_parameters = calculate_parameters(vanilla_policy_layers)
     number_of_vanilla_value_parameters = calculate_parameters(vanilla_value_layers)
     total_vanilla_parameters = (

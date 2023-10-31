@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from blitz.losses.kl_divergence import kl_divergence_from_nn
 
-from Custom_layers import BayesianLinear
+from custom_layers import BayesianLinear
 
 
 class Agent(nn.Module):
@@ -494,45 +494,3 @@ class BayesianAgent(nn.Module):
         layer.weight.data = weights
         layer.bias.data = biases
         return layer
-
-
-# import flax.linen as nn
-# from flax.linen.initializers import normal
-
-
-# class AgentNetworkFlax(nn.Module):
-#     def setup(self):
-#         # Policy Network
-#         self.policy_net = nn.Sequential(
-#             [
-#                 nn.Dense(features=64, kernel_init=normal()),
-#                 nn.silu,
-#                 nn.Dense(features=64, kernel_init=normal()),
-#                 nn.silu,
-#                 nn.Dense(features=16, kernel_init=normal()),
-#             ]
-#         )
-#         # Value Network
-#         self.value_net = nn.Sequential(
-#             [
-#                 nn.Dense(features=64, kernel_init=normal()),
-#                 nn.silu,
-#                 nn.Dense(features=64, kernel_init=normal()),
-#                 nn.silu,
-#                 nn.Dense(features=1, kernel_init=normal()),
-#             ]
-#         )
-
-#     def __call__(self, x):
-#         policy = self.policy_net(x)
-#         value = self.value_net(x)
-#         return policy, value
-
-
-# Usage example (assuming input_dim is the dimensionality of your input data)
-# import jax
-# key = jax.random.PRNGKey(0)
-# x = jax.random.normal(key, (1, 27))
-# model = YourModel()
-# params = model.init(key, x)
-# print(model.apply(params, x))
