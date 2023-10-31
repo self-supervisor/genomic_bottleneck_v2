@@ -4,8 +4,9 @@ from typing import Dict, Sequence
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from blitz.losses.kl_divergence import kl_divergence_from_nn
 
-from Custom_layers import BayesianLinear
+from custom_layers import BayesianLinear
 
 
 class Agent(nn.Module):
@@ -13,6 +14,7 @@ class Agent(nn.Module):
 
     def __init__(
         self,
+        clipping_val: float,
         policy_layers: Sequence[int],
         value_layers: Sequence[int],
         entropy_cost: float,
@@ -44,7 +46,7 @@ class Agent(nn.Module):
         self.discounting = discounting
         self.reward_scaling = reward_scaling
         self.lambda_ = 0.95
-        self.epsilon = 0.3
+        self.epsilon = clipping_val
         self.device = device
 
     @torch.jit.export
@@ -180,12 +182,14 @@ class Agent(nn.Module):
         # Entropy reward
         entropy = torch.mean(self.dist_entropy(loc, scale))
         entropy_loss = self.entropy_cost * -entropy
+        kl_loss = torch.zeros_like(entropy_loss)
 
         return (
-            policy_loss + v_loss + entropy_loss,
+            policy_loss + v_loss + entropy_loss + kl_loss,
             policy_loss,
             v_loss,
             entropy_loss,
+            kl_loss,
         )
 
 
@@ -194,6 +198,7 @@ class BayesianAgent(nn.Module):
 
     def __init__(
         self,
+        clipping_val: float,
         number_of_cell_types: int,
         policy_layers: Sequence[int],
         value_layers: Sequence[int],
@@ -201,6 +206,7 @@ class BayesianAgent(nn.Module):
         discounting: float,
         reward_scaling: float,
         device: str,
+        complexity_cost: float,
     ):
         super(BayesianAgent, self).__init__()
 
@@ -241,6 +247,7 @@ class BayesianAgent(nn.Module):
         self.reward_scaling = reward_scaling
         self.lambda_ = 0.95
         self.epsilon = 0.3
+        self.complexity_cost = complexity_cost
         self.device = device
 
     @torch.jit.export
@@ -376,15 +383,70 @@ class BayesianAgent(nn.Module):
         # Entropy reward
         entropy = torch.mean(self.dist_entropy(loc, scale))
         entropy_loss = self.entropy_cost * -entropy
+        kl_loss = self.complexity_cost * (
+            kl_divergence_from_nn(self.policy) + kl_divergence_from_nn(self.value)
+        )
 
         return (
-            policy_loss + v_loss + entropy_loss,
+            policy_loss + v_loss + entropy_loss + kl_loss,
             policy_loss,
             v_loss,
             entropy_loss,
+            kl_loss,
         )
 
-    def sample_vanilla_agent(self):
+    def sample_mean_agent(
+        self, clipping_val: float, learning_rate: float, entropy_cost: float
+    ):
+        self.learning_rate = learning_rate
+        self.entropy_cost = entropy_cost
+        policy_layers = []
+        value_layers = []
+        for a_layer in self.policy:
+            if type(a_layer) == BayesianLinear:
+                policy_layers.append(
+                    self.construct_vanilla_layer(
+                        a_layer.weight_sampler.mu[0].T, a_layer.bias_sampler.mu
+                    )
+                )
+                policy_layers.append(nn.SiLU())
+        for a_layer in self.value:
+            if type(a_layer) == BayesianLinear:
+                value_layers.append(
+                    self.construct_vanilla_layer(
+                        a_layer.weight_sampler.mu[0].T, a_layer.bias_sampler.mu
+                    )
+                )
+                value_layers.append(nn.SiLU())
+        policy_layers.pop()
+        value_layers.pop()
+        policy_layer_widths = [
+            layer.in_features for layer in policy_layers if type(layer) == nn.Linear
+        ]
+        value_layer_widths = [
+            layer.in_features for layer in value_layers if type(layer) == nn.Linear
+        ]
+        vanilla_agent = Agent(
+            clipping_val,
+            policy_layer_widths,
+            value_layer_widths,
+            self.entropy_cost,
+            self.discounting,
+            self.reward_scaling,
+            self.device,
+        )
+        vanilla_agent.policy = torch.nn.Sequential(*policy_layers)
+        vanilla_agent.value = torch.nn.Sequential(*value_layers)
+        vanilla_agent.running_mean = self.running_mean
+        vanilla_agent.running_variance = self.running_variance
+        vanilla_agent.num_steps = self.num_steps
+        return vanilla_agent
+
+    def sample_vanilla_agent(
+        self, clipping_val: float, learning_rate: float, entropy_cost: float
+    ):
+        self.learning_rate = learning_rate
+        self.entropy_cost = entropy_cost
         policy_layers = []
         value_layers = []
         for a_layer in self.policy:
@@ -412,6 +474,7 @@ class BayesianAgent(nn.Module):
             layer.in_features for layer in value_layers if type(layer) == nn.Linear
         ]
         vanilla_agent = Agent(
+            clipping_val,
             policy_layer_widths,
             value_layer_widths,
             self.entropy_cost,

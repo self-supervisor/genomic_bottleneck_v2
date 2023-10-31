@@ -2,36 +2,63 @@ import collections
 import os
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, List
 
 import jax
 
 from models import Agent, BayesianAgent
 from utils import calculate_compression_ratio
+from omegaconf import OmegaConf
 
 print("jax devices", jax.devices())
 
 
 import random
 
-import gym
+import scipy
 import numpy as np
 import torch
-import torch.nn.functional as F
 import wandb
 from brax import envs
 from brax.envs.wrappers import gym as gym_wrapper
 from brax.envs.wrappers import torch as torch_wrapper
-from brax.io import metrics
-from brax.training.agents.ppo import train as ppo
-from torch import nn, optim
+from torch import optim
+from tqdm import tqdm
+import hydra
+from hydra.core.config_store import ConfigStore
+
+from omegaconf import DictConfig
+from config import TrainConfig
+
+cs = ConfigStore.instance()
+cs.store(name="default", node=TrainConfig)
+from utils import make_legs_longer
+from brax.spring.base import State, Transform, Motion
 
 
-def main(args):
-    random.seed(int(args.seed))
-    torch.manual_seed(int(args.seed))
+def write_to_csv(*, cfg_to_log: dict, path: str = "csv_logs/") -> None:
+    """Write the config and final reward to a csv file."""
+    if not os.path.exists(path):
+        os.makedirs(path)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    file_path = os.path.join(path, f"{timestamp}.csv")
 
-    config = vars(args)
+    assert not os.path.exists(file_path)
+
+    with open(file_path, "a") as f:
+        f.write(",".join([str(k) for k in cfg_to_log.keys()]) + "\n")
+        f.write(",".join([str(v) for v in cfg_to_log.values()]) + "\n")
+
+
+@hydra.main(config_path=".", config_name="ant")
+def main(cfg: DictConfig) -> None:
+    np.random.seed(cfg.seed)
+    random.seed(int(cfg.seed))
+    torch.manual_seed(int(cfg.seed))
+
+    dict_config = OmegaConf.to_container(cfg, resolve=True)
+    cfg_to_log = dict(cfg)
+
     StepData = collections.namedtuple(
         "StepData", ("observation", "logits", "action", "reward", "done", "truncation")
     )
@@ -44,16 +71,60 @@ def main(args):
             items[k] = f(*[sd._asdict()[k] for sd in sds])
         return StepData(**items)
 
-    def eval_unroll(agent, env, length):
+    def make_one_state(state: State):
+        from jaxlib.xla_extension import ArrayImpl
+
+        new_state_dict = {}
+        for key in state.__dict__.keys():
+            if type(state.__dict__[key]) == Transform:
+                new_transform = Transform(
+                    pos=state.__dict__[key].pos[0], rot=state.__dict__[key].rot[0],
+                )
+                new_state_dict[key] = new_transform
+            elif type(state.__dict__[key]) == ArrayImpl:
+                new_jnp_array = state.__dict__[key][0]
+                new_state_dict[key] = new_jnp_array
+            elif type(state.__dict__[key]) == Motion:
+                new_motion = Motion(
+                    ang=state.__dict__[key].ang[0], vel=state.__dict__[key].vel[0],
+                )
+                new_state_dict[key] = new_motion
+            elif state.__dict__[key] == None:
+                new_state_dict[key] = None
+            else:
+                raise ValueError("Uknown type in state class", key)
+        return State(**new_state_dict)
+
+    def extract_one_trajectory(rollout: List[State]) -> List[State]:
+        new_rollout = []
+        for i in range(len(rollout)):
+            new_rollout.append(make_one_state(rollout[i]))
+        return new_rollout
+
+    def save_rollout_to_html(env, rollout: List[State], html_name: str = None) -> None:
+        if html_name != None:
+            from brax.io import html
+
+            rollout = extract_one_trajectory(rollout=rollout)
+            html_path = f"trajectory_{html_name}.html"
+            html_data = html.render(sys=env.env._env.sys, states=rollout)
+            with open(html_path, "w") as f:
+                f.write(html_data)
+
+    def eval_unroll(agent, env, length, html_name: str = None):
         """Return number of episodes and average reward for a single unroll."""
         observation = env.reset()
         episodes = torch.zeros((), device=agent.device)
         episode_reward = torch.zeros((), device=agent.device)
+        rollout = []
         for _ in range(length):
+            rollout.append(env.env._state.pipeline_state)
             _, action = agent.get_logits_action(observation)
             observation, reward, done, _ = env.step(Agent.dist_postprocess(action))
             episodes += torch.sum(done)
             episode_reward += torch.sum(reward)
+
+        save_rollout_to_html(env, rollout=rollout, html_name=html_name)
         return episodes, episode_reward / episodes
 
     def train_unroll(agent, env, observation, num_unrolls, unroll_length):
@@ -77,30 +148,55 @@ def main(args):
         td = sd_map(torch.stack, sd)
         return observation, td
 
-    def train(
-        seed: int,
-        wandb_prefix: str,
-        bayesian_agent_to_sample: None,
-        is_weight_sharing: bool,
-        number_of_cell_types: int,
-        env_name: str = "ant",
-        num_envs: int = 2_048,
-        episode_length: int = 1_000,
-        device: str = "cuda",
-        num_timesteps: int = 300_000_000,
-        eval_frequency: int = 100,
-        unroll_length: int = 5,
-        batch_size: int = 1024,
-        num_minibatches: int = 32,
-        num_update_epochs: int = 4,
-        reward_scaling: float = 0.1,
-        entropy_cost: float = 1e-2,
-        discounting: float = 0.97,
-        learning_rate: float = 3e-4,
-        progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
+    def eval_agent(agent, env, episode_length, html_name: str = None):
+        t = time.time()
+        with torch.no_grad():
+            episode_count, episode_reward = eval_unroll(
+                agent, env, episode_length, html_name
+            )
+        duration = time.time() - t
+        episode_avg_length = env.num_envs * episode_length / episode_count
+        eval_sps = env.num_envs * episode_length / duration
+        return episode_reward, episode_count, episode_avg_length, eval_sps
+
+    def make_population_histogram(episode_rewards_list, mean_reward, wandb_prefix):
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Histogram(
+                x=episode_rewards_list, name="histogram of sample network performance",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[mean_reward, mean_reward],
+                y=[0, 100],
+                mode="lines",
+                name="mean network performance",
+                line=dict(color="red", width=2),
+            )
+        )
+        fig.update_layout(
+            xaxis_title="episode return",
+            yaxis_title="count",
+            title="population histogram of network returns",
+        )
+
+        wandb.log({f"sampled_population_of_performances_{wandb_prefix}": fig})
+
+    def eval_population(
+        agent, seed, env_name, num_envs, clipping_val, learning_rate, entropy_cost,
     ):
-        """Trains a policy via PPO."""
-        number_of_cell_types = int(number_of_cell_types)
+        episode_rewards_list_normal_legs = []
+        episode_rewards_list_normal_legs_sanity_check = []
+        episode_rewards_list_long_legs = []
+        episode_std_list_normal_legs = []
+        episode_std_list_normal_legs_sanity_check = []
+        episode_std_list_long_legs = []
+        episode_length = 1000
+
+        make_legs_longer(length_adjustment=1.0)
         env = envs.create(
             env_name,
             batch_size=num_envs,
@@ -108,60 +204,212 @@ def main(args):
             backend="spring",
         )
         env = gym_wrapper.VectorGymWrapper(env, seed=seed)
+        env = torch_wrapper.TorchWrapper(env, device=agent.device)
+
+        make_legs_longer(length_adjustment=1.2)
+
+        env_long_legs = envs.create(
+            env_name,
+            batch_size=num_envs,
+            episode_length=episode_length,
+            backend="spring",
+        )
+        env_long_legs = gym_wrapper.VectorGymWrapper(env_long_legs, seed=seed)
+        env_long_legs = torch_wrapper.TorchWrapper(env_long_legs, device=agent.device)
+
+        mean_agent = agent.sample_mean_agent(clipping_val, learning_rate, entropy_cost)
+        mean_agent_reward_normal_legs, _, _, _ = eval_agent(
+            mean_agent, env, episode_length, html_name="short"
+        )
+        mean_agent_reward_long_legs, _, _, _ = eval_agent(
+            mean_agent, env_long_legs, episode_length, html_name="long"
+        )
+
+        make_legs_longer(length_adjustment=1.0)
+
+        for i in tqdm(range(100)):
+            sampled_agent = agent.sample_vanilla_agent(
+                clipping_val, learning_rate, entropy_cost
+            )
+            current_agent_returns_normal_legs = []
+            current_agent_returns_normal_legs_sanity_check = []
+            current_agent_returns_long_legs = []
+            for _ in tqdm(range(10)):
+                episode_reward, _, _, _ = eval_agent(sampled_agent, env, episode_length)
+                current_agent_returns_normal_legs.append(episode_reward.cpu().numpy())
+
+                episode_reward, _, _, _ = eval_agent(
+                    sampled_agent, env_long_legs, episode_length
+                )
+                current_agent_returns_long_legs.append(episode_reward.cpu().numpy())
+
+                episode_reward, _, _, _ = eval_agent(sampled_agent, env, episode_length)
+                current_agent_returns_normal_legs_sanity_check.append(
+                    episode_reward.cpu().numpy()
+                )
+
+            episode_rewards_list_normal_legs.append(
+                np.mean(np.array(current_agent_returns_normal_legs))
+            )
+            episode_std_list_normal_legs.append(
+                scipy.stats.sem(np.array(current_agent_returns_normal_legs))
+            )
+            episode_rewards_list_normal_legs_sanity_check.append(
+                np.mean(np.array(current_agent_returns_normal_legs_sanity_check))
+            )
+            episode_std_list_normal_legs_sanity_check.append(
+                np.mean(np.array(current_agent_returns_normal_legs_sanity_check))
+            )
+            episode_rewards_list_long_legs.append(
+                np.mean(np.array(current_agent_returns_long_legs))
+            )
+            episode_std_list_long_legs.append(
+                scipy.stats.sem(np.array(current_agent_returns_long_legs))
+            )
+
+        make_population_histogram(
+            episode_rewards_list_normal_legs,
+            mean_agent_reward_normal_legs.cpu().numpy(),
+            wandb_prefix="normal_legs",
+        )
+        make_population_histogram(
+            episode_rewards_list_long_legs,
+            mean_agent_reward_long_legs.cpu().numpy(),
+            wandb_prefix="long_legs",
+        )
+        make_scatter_plot(
+            episode_rewards_list_normal_legs,
+            episode_rewards_list_long_legs,
+            episode_std_list_normal_legs,
+            episode_std_list_long_legs,
+            wandb_prefix="",
+        )
+        make_scatter_plot(
+            episode_rewards_list_normal_legs,
+            episode_rewards_list_normal_legs_sanity_check,
+            episode_std_list_normal_legs,
+            episode_std_list_normal_legs_sanity_check,
+            wandb_prefix=" sanity check, ",
+        )
+
+    def make_scatter_plot(x, y, error_x_vals, error_y_vals, wandb_prefix):
+        import plotly.graph_objects as go
+
+        # Fitting a straight line
+        slope, intercept = np.polyfit(x, y, 1)
+        line_y = [slope * xi + intercept for xi in x]
+
+        fig = go.Figure()
+
+        # Scatter plot with error bars
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                error_x=dict(
+                    type="data",  # Data means we provide actual values for error
+                    array=error_x_vals,
+                    visible=True,
+                ),
+                error_y=dict(type="data", array=error_y_vals, visible=True),
+                mode="markers",
+                name="return of normal legs vs long legs",
+                marker=dict(color="red", size=3),
+            )
+        )
+
+        # Straight line plot
+        fig.add_trace(
+            go.Scatter(x=x, y=line_y, mode="lines", name="Fit", line=dict(color="blue"))
+        )
+
+        fig.update_layout(
+            xaxis_title="normal legs return", yaxis_title="long legs return",
+        )
+
+        wandb.log(
+            {
+                f"visualising how population ranking changes with different leg length{wandb_prefix}slope={slope:.3f}": fig
+            }
+        )
+
+    def train(*, cfg, bayesian_agent_to_sample, progress_fn, wandb_prefix):
+        """Trains a policy via PPO."""
+        number_of_cell_types = int(cfg.number_of_cell_types)
+        env = envs.create(
+            cfg.env_name,
+            batch_size=cfg.num_envs,
+            episode_length=cfg.episode_length,
+            backend="spring",
+        )
+        env = gym_wrapper.VectorGymWrapper(env, seed=cfg.seed)
         # automatically convert between jax ndarrays and torch tensors:
-        env = torch_wrapper.TorchWrapper(env, device=device)
+        env = torch_wrapper.TorchWrapper(env, device=cfg.device)
 
         # env warmup
         env.reset()
-        action = torch.zeros(env.action_space.shape).to(device)
+        action = torch.zeros(env.action_space.shape).to(cfg.device)
         env.step(action)
 
         # create the agent
         vanilla_policy_layers = [
             env.observation_space.shape[-1],
-            64,
-            64,
+            cfg.hidden_size,
+            cfg.hidden_size,
             env.action_space.shape[-1] * 2,
         ]
-        vanilla_value_layers = [env.observation_space.shape[-1], 64, 64, 1]
+        vanilla_value_layers = [
+            env.observation_space.shape[-1],
+            cfg.hidden_size,
+            cfg.hidden_size,
+            1,
+        ]
         compression_ratio = calculate_compression_ratio(
             env,
             vanilla_policy_layers,
             vanilla_value_layers,
             number_of_cell_types=number_of_cell_types,
         )
-        config["compression_ratio"] = compression_ratio
+        dict_config["compression_ratio"] = compression_ratio
 
         wandb.init(
             project="brax-cshl",
-            config=config,
-            dir="/grid/zador/data_norepl/augustine/wandb_logging",
+            config=dict_config,
+            dir="/grid/zador/mavorpar/wandb_logging",
         )
+
         if bayesian_agent_to_sample is not None:
-            agent = bayesian_agent_to_sample.sample_vanilla_agent()
+            agent = bayesian_agent_to_sample.sample_vanilla_agent(
+                cfg.clipping_val, cfg.learning_rate, cfg.entropy_cost
+            )
         else:
-            if is_weight_sharing == True:
+            if cfg.is_weight_sharing == True:
                 agent = BayesianAgent(
+                    cfg.clipping_val,
                     number_of_cell_types,
                     vanilla_policy_layers,
                     vanilla_value_layers,
-                    entropy_cost,
-                    discounting,
-                    reward_scaling,
-                    device,
+                    cfg.entropy_cost,
+                    cfg.discounting,
+                    cfg.reward_scaling,
+                    cfg.device,
+                    cfg.complexity_cost,
                 )
-            elif is_weight_sharing == False:
+            elif cfg.is_weight_sharing == False:
                 agent = Agent(
+                    cfg.clipping_val,
                     vanilla_policy_layers,
                     vanilla_value_layers,
-                    entropy_cost,
-                    discounting,
-                    reward_scaling,
-                    device,
+                    cfg.entropy_cost,
+                    cfg.discounting,
+                    cfg.reward_scaling,
+                    cfg.device,
                 )
 
-        agent = agent.to(device)
-        optimizer = optim.Adam(agent.parameters(), lr=learning_rate)
+        agent = agent.to(cfg.device)
+        num_of_params = sum(p.numel() for p in agent.parameters() if p.requires_grad)
+
+        optimizer = optim.Adam(agent.parameters(), lr=cfg.learning_rate)
 
         sps = 0
         total_steps = 0
@@ -169,18 +417,19 @@ def main(args):
         total_policy_loss = 0
         total_value_loss = 0
         total_entropy_loss = 0
+        total_kl_loss = 0
 
-        for eval_i in range(eval_frequency + 1):
+        for eval_i in range(cfg.eval_frequency + 1):
             if progress_fn:
                 t = time.time()
                 with torch.no_grad():
                     episode_count, episode_reward = eval_unroll(
-                        agent, env, episode_length
+                        agent, env, cfg.episode_length
                     )
                 duration = time.time() - t
                 # TODO: only count stats from completed episodes
-                episode_avg_length = env.num_envs * episode_length / episode_count
-                eval_sps = env.num_envs * episode_length / duration
+                episode_avg_length = env.num_envs * cfg.episode_length / episode_count
+                eval_sps = env.num_envs * cfg.episode_length / duration
                 progress = {
                     "eval/episode_reward": episode_reward,
                     "eval/completed_episodes": episode_count,
@@ -194,18 +443,18 @@ def main(args):
                 }
                 progress_fn(total_steps, progress, wandb_prefix)
 
-            if eval_i == eval_frequency:
+            if eval_i == cfg.eval_frequency:
                 break
 
             observation = env.reset()
-            num_steps = batch_size * num_minibatches * unroll_length
-            num_epochs = num_timesteps // (num_steps * eval_frequency)
-            num_unrolls = batch_size * num_minibatches // env.num_envs
+            num_steps = cfg.batch_size * cfg.num_minibatches * cfg.unroll_length
+            num_epochs = cfg.num_timesteps // (num_steps * cfg.eval_frequency)
+            num_unrolls = cfg.batch_size * cfg.num_minibatches // env.num_envs
             total_loss = 0
             t = time.time()
             for _ in range(num_epochs):
                 observation, td = train_unroll(
-                    agent, env, observation, num_unrolls, unroll_length
+                    agent, env, observation, num_unrolls, cfg.unroll_length
                 )
 
                 # make unroll first
@@ -218,26 +467,26 @@ def main(args):
                 # update normalization statistics
                 agent.update_normalization(td.observation)
 
-                for _ in range(num_update_epochs):
+                for _ in range(cfg.num_update_epochs):
                     # shuffle and batch the data
                     with torch.no_grad():
                         permutation = torch.randperm(
-                            td.observation.shape[1], device=device
+                            td.observation.shape[1], device=cfg.device
                         )
 
                         def shuffle_batch(data):
                             data = data[:, permutation]
                             data = data.reshape(
-                                [data.shape[0], num_minibatches, -1]
+                                [data.shape[0], cfg.num_minibatches, -1]
                                 + list(data.shape[2:])
                             )
                             return data.swapaxes(0, 1)
 
                         epoch_td = sd_map(shuffle_batch, td)
 
-                    for minibatch_i in range(num_minibatches):
+                    for minibatch_i in range(cfg.num_minibatches):
                         td_minibatch = sd_map(lambda d: d[minibatch_i], epoch_td)
-                        loss, policy_loss, v_loss, entropy_loss = agent.loss(
+                        loss, policy_loss, v_loss, entropy_loss, kl_loss = agent.loss(
                             td_minibatch._asdict()
                         )
                         optimizer.zero_grad()
@@ -247,21 +496,42 @@ def main(args):
                         total_value_loss += v_loss
                         total_entropy_loss += entropy_loss
                         total_loss += loss
+                        total_kl_loss += kl_loss
 
             duration = time.time() - t
             total_steps += num_epochs * num_steps
-            total_loss = total_loss / (num_epochs * num_update_epochs * num_minibatches)
+            total_loss = total_loss / (
+                num_epochs * cfg.num_update_epochs * cfg.num_minibatches
+            )
             total_entropy_loss = total_entropy_loss / (
-                num_epochs * num_update_epochs * num_minibatches
+                num_epochs * cfg.num_update_epochs * cfg.num_minibatches
             )
             total_policy_loss = total_policy_loss / (
-                num_epochs * num_update_epochs * num_minibatches
+                num_epochs * cfg.num_update_epochs * cfg.num_minibatches
             )
             total_value_loss = total_value_loss / (
-                num_epochs * num_update_epochs * num_minibatches
+                num_epochs * cfg.num_update_epochs * cfg.num_minibatches
             )
             sps = num_epochs * num_steps / duration
-        return agent
+        if "within_lifetime" not in wandb_prefix:
+            percentage_of_SOTA_reward = (
+                (
+                    (episode_reward - cfg.min_performance)
+                    / (cfg.SOTA_performance - cfg.min_performance)
+                )
+                .detach()
+                .cpu()
+                .numpy()
+                .item()
+            )
+            wandb.log(
+                {f"{wandb_prefix}_percentage_of_SOTA_reward": percentage_of_SOTA_reward}
+            )
+            cfg_to_log["compression_ratio"] = compression_ratio
+        else:
+            percentage_of_SOTA_reward = None
+
+        return agent, num_of_params, percentage_of_SOTA_reward
 
     os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
@@ -271,42 +541,44 @@ def main(args):
     train_sps = []
     times = [datetime.now()]
 
-    def progress(num_steps, metrics, wandb_prefix):
-        times.append(datetime.now())
-        xdata.append(num_steps)
-        ydata.append(metrics["eval/episode_reward"].cpu())
-        eval_sps.append(metrics["speed/eval_sps"])
-        train_sps.append(metrics["speed/sps"])
-        wandb.log(
-            {
-                f"{wandb_prefix}_losses/total_loss": metrics["losses/total_loss"],
-                f"{wandb_prefix}_losses/total_policy_loss": metrics[
-                    "losses/total_policy_loss"
-                ],
-                f"{wandb_prefix}_losses/total_value_loss": metrics[
-                    "losses/total_value_loss"
-                ],
-                f"{wandb_prefix}_losses/total_entropy_loss": metrics[
-                    "losses/total_entropy_loss"
-                ],
-                f"{wandb_prefix}_eval/episode_reward": metrics["eval/episode_reward"],
-                f"{wandb_prefix}_speed/eval_sps": metrics["speed/eval_sps"],
-                f"{wandb_prefix}_speed/sps": metrics["speed/sps"],
-            },
-        )
+    def progress(num_steps, metrics, wandb_prefix, logging_population=True):
+        if logging_population == False:
+            wandb.log(
+                {
+                    f"{wandb_prefix}_losses/total_loss": metrics["losses/total_loss"],
+                    f"{wandb_prefix}_losses/total_policy_loss": metrics[
+                        "losses/total_policy_loss"
+                    ],
+                    f"{wandb_prefix}_losses/total_value_loss": metrics[
+                        "losses/total_value_loss"
+                    ],
+                    f"{wandb_prefix}_losses/total_entropy_loss": metrics[
+                        "losses/total_entropy_loss"
+                    ],
+                    f"{wandb_prefix}_eval/episode_reward": metrics[
+                        "eval/episode_reward"
+                    ],
+                    f"{wandb_prefix}_speed/eval_sps": metrics["speed/eval_sps"],
+                    f"{wandb_prefix}_speed/sps": metrics["speed/sps"],
+                },
+            )
+            times.append(datetime.now())
+            xdata.append(num_steps)
+            ydata.append(metrics["eval/episode_reward"].cpu())
+            eval_sps.append(metrics["speed/eval_sps"])
+            train_sps.append(metrics["speed/sps"])
+        elif logging_population == True:
+            wandb.log(
+                {"population_eval/episode_reward": metrics["eval/episode_reward"]},
+            )
+        else:
+            raise ValueError("logging_population must be a Boolean")
 
-    agent = train(
-        wandb_prefix="bayesian",
+    agent, num_params_evolutionary, percentage_of_SOTA_reward = train(
+        cfg=cfg,
         bayesian_agent_to_sample=None,
-        env_name=args.env_name,
-        is_weight_sharing=args.is_weight_sharing,
-        number_of_cell_types=args.number_of_cell_types,
         progress_fn=progress,
-        seed=int(args.seed),
-        num_envs=int(args.number_envs),
-        batch_size=int(args.batch_size),
-        learning_rate=float(args.learning_rate),
-        entropy_cost=float(args.entropy_cost),
+        wandb_prefix="evolutionary_learning",
     )
 
     print(f"time to jit: {times[1] - times[0]}")
@@ -314,41 +586,40 @@ def main(args):
     print(f"eval steps/sec: {np.mean(eval_sps)}")
     print(f"train steps/sec: {np.mean(train_sps)}")
 
-    print("now doing within lifetime learning...")
+    print("now evaluating population statistics...")
 
-    agent = train(
-        wandb_prefix="within_lifeteime_learning",
-        bayesian_agent_to_sample=agent,
-        env_name=args.env_name,
-        is_weight_sharing=args.is_weight_sharing,
-        number_of_cell_types=args.number_of_cell_types,
-        progress_fn=progress,
-        seed=int(args.seed),
-        num_envs=int(args.number_envs) * 2,
-        batch_size=int(args.batch_size) * 2,
-        learning_rate=float(args.learning_rate),
-        entropy_cost=float(args.entropy_cost),
+    if cfg.eval_population:
+        eval_population(
+            agent=agent,
+            seed=cfg.seed,
+            env_name=cfg.env_name,
+            num_envs=cfg.batch_size,
+            clipping_val=cfg.clipping_val,
+            learning_rate=cfg.learning_rate,
+            entropy_cost=cfg.entropy_cost,
+        )
+
+    if cfg.is_weight_sharing != False:
+        cfg.num_timesteps = cfg.num_timesteps * 2
+        cfg.eval_frequency = cfg.eval_frequency * 2
+        agent, num_params_within_lifetime, _ = train(
+            cfg,
+            bayesian_agent_to_sample=agent,
+            progress_fn=progress,
+            wandb_prefix="within_lifetime_learning",
+        )
+
+    wandb.log(
+        {
+            "pytorch_reported_compression": num_params_within_lifetime
+            / num_params_evolutionary
+        }
     )
+
+    cfg_to_log["proportion_of_max_score"] = percentage_of_SOTA_reward
+    cfg_to_log["num_params_evolutionary"] = num_params_evolutionary
+    write_to_csv(cfg_to_log=cfg_to_log)
 
 
 if __name__ == "__main__":
-    import argparse
-    from distutils.util import strtobool
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", default=0)
-    parser.add_argument("--learning_rate", default=3e-4)
-    parser.add_argument("--entropy_cost", default=1e-2)
-    parser.add_argument("--number_envs", default=2048)
-    parser.add_argument("--batch_size", default=1024)
-    parser.add_argument("--number_of_cell_types", default=64)
-    parser.add_argument(
-        "--is_weight_sharing",
-        type=lambda x: bool(strtobool(x)),
-        default=True,
-        nargs="?",
-        const=True,
-    )
-    parser.add_argument("--env_name", default="ant")
-    args = parser.parse_args()
-    main(args)
+    main()

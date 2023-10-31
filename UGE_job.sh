@@ -1,17 +1,26 @@
 #!/bin/bash
 
 #$ -cwd
-#$ -o elzar-logs_weight_sharing_cheetah
-#$ -e elzar-logs_weight_sharing_cheetah
 #$ -j y
-#$ -N weight_sharing_cheetah
-#$ -t 1-25
-#$ -pe threads 8
+#$ -t 1-50
+#$ -o cheetah_fix
+#$ -e cheetah_fix
+#$ -N cheetah_fix
 #$ -l gpu=1
 
-# Calculate indices for each list
-let "seed_idx = (${SGE_TASK_ID}-1) / 5 % 5"   # 5 is the length of seed_list
-let "cell_types_idx = (${SGE_TASK_ID}-1) % 5"   # 5 is the length of number_of_cell_types_list
+CONFIG_NAMES=("halfcheetah" "ant")  # Add as many config names as you have
+SEEDS=(0 1 2 3 4)  # Adjust the seed range as you need
+NUM_CELL_TYPES=(128 64 48 32 16)  # Adjust as per your requirement
 
-# Call the shell script with these indices
-bash run_my_job.sh $seed_idx $cell_types_idx
+# Calculate indices for array job
+CONFIG_INDEX=$((($SGE_TASK_ID-1)/(${#SEEDS[@]}*${#NUM_CELL_TYPES[@]})))
+SEED_INDEX=$((($SGE_TASK_ID-1)/${#NUM_CELL_TYPES[@]}%${#SEEDS[@]}))
+CELL_INDEX=$((($SGE_TASK_ID-1)%${#NUM_CELL_TYPES[@]}))
+
+# Extract actual values using indices
+CONFIG_NAME=${CONFIG_NAMES[$CONFIG_INDEX]}
+SEED=${SEEDS[$SEED_INDEX]}
+CELL_TYPE=${NUM_CELL_TYPES[$CELL_INDEX]}
+
+# Now call your python script with these parameters
+python training_torch.py --config-name=$CONFIG_NAME seed=$SEED number_of_cell_types=$CELL_TYPE hidden_size=128
