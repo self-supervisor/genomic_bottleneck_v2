@@ -12,9 +12,9 @@ from blitz.modules.weight_sampler import (
 from blitz.utils import variational_estimator
 
 from utils import (
-    gather_nd_torch_dims_flat,
-    gather2D,
     find_num_neuron_per_type,
+    gather2D,
+    gather_nd_torch_dims_flat,
     get_indices,
 )
 
@@ -72,7 +72,7 @@ class TrainableRandomDistribution_weight_share(nn.Module):
         log_posteriors = (
             -log_sqrt2pi
             - torch.log(self.sigma)
-            - (((w - self.mu) ** 2) / (2 * self.sigma ** 2))
+            - (((w - self.mu) ** 2) / (2 * self.sigma**2))
             - 0.5
         )
         return log_posteriors.sum()

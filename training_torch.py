@@ -75,7 +75,8 @@ def main(cfg: DictConfig) -> None:
         for key in state.__dict__.keys():
             if type(state.__dict__[key]) == Transform:
                 new_transform = Transform(
-                    pos=state.__dict__[key].pos[0], rot=state.__dict__[key].rot[0],
+                    pos=state.__dict__[key].pos[0],
+                    rot=state.__dict__[key].rot[0],
                 )
                 new_state_dict[key] = new_transform
             elif type(state.__dict__[key]) == ArrayImpl:
@@ -83,7 +84,8 @@ def main(cfg: DictConfig) -> None:
                 new_state_dict[key] = new_jnp_array
             elif type(state.__dict__[key]) == Motion:
                 new_motion = Motion(
-                    ang=state.__dict__[key].ang[0], vel=state.__dict__[key].vel[0],
+                    ang=state.__dict__[key].ang[0],
+                    vel=state.__dict__[key].vel[0],
                 )
                 new_state_dict[key] = new_motion
             elif state.__dict__[key] == None:
@@ -177,7 +179,8 @@ def main(cfg: DictConfig) -> None:
         fig = go.Figure()
         fig.add_trace(
             go.Histogram(
-                x=episode_rewards_list, name="histogram of sample network performance",
+                x=episode_rewards_list,
+                name="histogram of sample network performance",
             )
         )
         fig.add_trace(
@@ -350,7 +353,8 @@ def main(cfg: DictConfig) -> None:
         )
 
         fig.update_layout(
-            xaxis_title="normal legs return", yaxis_title="long legs return",
+            xaxis_title="normal legs return",
+            yaxis_title="long legs return",
         )
 
         wandb.log(
