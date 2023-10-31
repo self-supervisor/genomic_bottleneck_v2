@@ -22,3 +22,4 @@ discounting: 0.97
 hidden_size: 128
 SOTA_performance: 8706
 min_performance: -724
+eval_population: True

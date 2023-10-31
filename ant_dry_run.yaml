@@ -20,3 +20,6 @@ num_timesteps: 1000000
 eval_frequency: 1
 reward_scaling: 10.0
 discounting: 0.97
+hidden_size: 128
+SOTA_performance: 8706
+min_performance: -724

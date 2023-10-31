@@ -2,7 +2,7 @@ import collections
 import os
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional, Tuple, List
+from typing import Callable, List
 
 import jax
 
@@ -16,18 +16,13 @@ print("jax devices", jax.devices())
 import random
 
 import scipy
-import gym
 import numpy as np
 import torch
-import torch.nn.functional as F
 import wandb
 from brax import envs
 from brax.envs.wrappers import gym as gym_wrapper
 from brax.envs.wrappers import torch as torch_wrapper
-from brax.io import metrics
-from brax.io import torch as brax_torch
-from brax.training.agents.ppo import train as ppo
-from torch import nn, optim
+from torch import optim
 from tqdm import tqdm
 import hydra
 from hydra.core.config_store import ConfigStore
@@ -37,6 +32,8 @@ from config import TrainConfig
 
 cs = ConfigStore.instance()
 cs.store(name="default", node=TrainConfig)
+from utils import make_legs_longer
+from brax.spring.base import State, Transform, Motion
 
 
 def write_to_csv(*, cfg_to_log: dict, path: str = "csv_logs/") -> None:
@@ -81,8 +78,7 @@ def main(cfg: DictConfig) -> None:
         for key in state.__dict__.keys():
             if type(state.__dict__[key]) == Transform:
                 new_transform = Transform(
-                    pos=state.__dict__[key].pos[0],
-                    rot=state.__dict__[key].rot[0],
+                    pos=state.__dict__[key].pos[0], rot=state.__dict__[key].rot[0],
                 )
                 new_state_dict[key] = new_transform
             elif type(state.__dict__[key]) == ArrayImpl:
@@ -90,8 +86,7 @@ def main(cfg: DictConfig) -> None:
                 new_state_dict[key] = new_jnp_array
             elif type(state.__dict__[key]) == Motion:
                 new_motion = Motion(
-                    ang=state.__dict__[key].ang[0],
-                    vel=state.__dict__[key].vel[0],
+                    ang=state.__dict__[key].ang[0], vel=state.__dict__[key].vel[0],
                 )
                 new_state_dict[key] = new_motion
             elif state.__dict__[key] == None:
@@ -170,8 +165,7 @@ def main(cfg: DictConfig) -> None:
         fig = go.Figure()
         fig.add_trace(
             go.Histogram(
-                x=episode_rewards_list,
-                name="histogram of sample network performance",
+                x=episode_rewards_list, name="histogram of sample network performance",
             )
         )
         fig.add_trace(
@@ -192,13 +186,7 @@ def main(cfg: DictConfig) -> None:
         wandb.log({f"sampled_population_of_performances_{wandb_prefix}": fig})
 
     def eval_population(
-        agent,
-        seed,
-        env_name,
-        num_envs,
-        clipping_val,
-        learning_rate,
-        entropy_cost,
+        agent, seed, env_name, num_envs, clipping_val, learning_rate, entropy_cost,
     ):
         episode_rewards_list_normal_legs = []
         episode_rewards_list_normal_legs_sanity_check = []
@@ -336,8 +324,7 @@ def main(cfg: DictConfig) -> None:
         )
 
         fig.update_layout(
-            xaxis_title="normal legs return",
-            yaxis_title="long legs return",
+            xaxis_title="normal legs return", yaxis_title="long legs return",
         )
 
         wandb.log(
@@ -346,30 +333,7 @@ def main(cfg: DictConfig) -> None:
             }
         )
 
-    def train(
-        clipping_val: float,
-        seed: int,
-        wandb_prefix: str,
-        bayesian_agent_to_sample: None,
-        is_weight_sharing: bool,
-        number_of_cell_types: int,
-        complexity_cost: float,
-        env_name: str = "halfcheetah",
-        num_envs: int = 2_048,
-        episode_length: int = 1_000,
-        device: str = "cuda",
-        num_timesteps: int = 100_000_000,
-        eval_frequency: int = 30,
-        unroll_length: int = 20,
-        batch_size: int = 512,
-        num_minibatches: int = 32,
-        num_update_epochs: int = 8,
-        reward_scaling: float = 10,
-        entropy_cost: float = 1e-2,
-        discounting: float = 0.97,
-        learning_rate: float = 3e-4,
-        progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
-    ):
+    def train(*, cfg, bayesian_agent_to_sample, progress_fn, wandb_prefix):
         """Trains a policy via PPO."""
         number_of_cell_types = int(cfg.number_of_cell_types)
         env = envs.create(
@@ -410,7 +374,7 @@ def main(cfg: DictConfig) -> None:
 
         wandb.init(
             project="brax-cshl",
-            config=config,
+            config=dict_config,
             dir="/grid/zador/mavorpar/wandb_logging",
         )
 
@@ -456,7 +420,7 @@ def main(cfg: DictConfig) -> None:
         total_kl_loss = 0
 
         for eval_i in range(cfg.eval_frequency + 1):
-            if progress_function:
+            if progress_fn:
                 t = time.time()
                 with torch.no_grad():
                     episode_count, episode_reward = eval_unroll(
@@ -477,7 +441,7 @@ def main(cfg: DictConfig) -> None:
                     "losses/total_entropy_loss": total_entropy_loss,
                     "losses/total_loss": total_loss,
                 }
-                progress_function(total_steps, progress, wandb_prefix)
+                progress_fn(total_steps, progress, wandb_prefix)
 
             if eval_i == cfg.eval_frequency:
                 break
@@ -613,7 +577,7 @@ def main(cfg: DictConfig) -> None:
     agent, num_params_evolutionary, percentage_of_SOTA_reward = train(
         cfg=cfg,
         bayesian_agent_to_sample=None,
-        progress_function=progress,
+        progress_fn=progress,
         wandb_prefix="evolutionary_learning",
     )
 
@@ -624,13 +588,24 @@ def main(cfg: DictConfig) -> None:
 
     print("now evaluating population statistics...")
 
+    if cfg.eval_population:
+        eval_population(
+            agent=agent,
+            seed=cfg.seed,
+            env_name=cfg.env_name,
+            num_envs=cfg.batch_size,
+            clipping_val=cfg.clipping_val,
+            learning_rate=cfg.learning_rate,
+            entropy_cost=cfg.entropy_cost,
+        )
+
     if cfg.is_weight_sharing != False:
         cfg.num_timesteps = cfg.num_timesteps * 2
         cfg.eval_frequency = cfg.eval_frequency * 2
         agent, num_params_within_lifetime, _ = train(
             cfg,
             bayesian_agent_to_sample=agent,
-            progress_function=progress,
+            progress_fn=progress,
             wandb_prefix="within_lifetime_learning",
         )
 
