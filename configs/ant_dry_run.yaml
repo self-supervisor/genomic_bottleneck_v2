@@ -7,11 +7,11 @@ num_update_epochs: 4
 num_minibatches: 32
 unroll_length: 5
 number_of_cell_types: 64
-is_weight_sharing: true
+is_weight_sharing: false
 clipping_val: 0.3
 within_lifetime_clipping_val: 0.3
 within_lifetime_learning_rate: 3e-4
-wandb_prefix: "bayesian"
+wandb_prefix: "vanilla"
 env_name: "ant"
 complexity_cost: 0
 episode_length: 1000

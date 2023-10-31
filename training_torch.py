@@ -437,6 +437,10 @@ def main(cfg: DictConfig) -> None:
                     cfg.reward_scaling,
                     cfg.device,
                 )
+            else:
+                raise ValueError(
+                    f"is_weight_sharing must be True or False but is {cfg.is_weight_sharing}"
+                )
 
         agent = agent.to(cfg.device)
         num_of_params = sum(p.numel() for p in agent.parameters() if p.requires_grad)
@@ -609,37 +613,38 @@ def main(cfg: DictConfig) -> None:
     print(f"eval steps/sec: {np.mean(eval_sps)}")
     print(f"train steps/sec: {np.mean(train_sps)}")
 
-    print("now evaluating population statistics...")
-
     if cfg.eval_population:
-        eval_population(
-            agent=agent,
-            seed=cfg.seed,
-            env_name=cfg.env_name,
-            num_envs=cfg.batch_size,
-            clipping_val=cfg.clipping_val,
-            learning_rate=cfg.learning_rate,
-            entropy_cost=cfg.entropy_cost,
-            networks_to_sample=cfg.networks_to_sample,
-            samples_to_take=cfg.samples_to_take,
-        )
+        print("now evaluating population statistics...")
+        if cfg.is_weight_sharing == True:
+            eval_population(
+                agent=agent,
+                seed=cfg.seed,
+                env_name=cfg.env_name,
+                num_envs=cfg.batch_size,
+                clipping_val=cfg.clipping_val,
+                learning_rate=cfg.learning_rate,
+                entropy_cost=cfg.entropy_cost,
+                networks_to_sample=cfg.networks_to_sample,
+                samples_to_take=cfg.samples_to_take,
+            )
 
     if cfg.is_weight_sharing != False:
         cfg.num_timesteps = cfg.num_timesteps * 2
         cfg.eval_frequency = cfg.eval_frequency * 2
         agent, num_params_within_lifetime, _ = train(
-            cfg,
+            cfg=cfg,
             bayesian_agent_to_sample=agent,
             progress_fn=progress,
             wandb_prefix="within_lifetime_learning",
         )
 
-    wandb.log(
-        {
-            "pytorch_reported_compression": num_params_within_lifetime
-            / num_params_evolutionary
-        }
-    )
+    if cfg.is_weight_sharing:
+        wandb.log(
+            {
+                "pytorch_reported_compression": num_params_within_lifetime
+                / num_params_evolutionary
+            }
+        )
 
     cfg_to_log["proportion_of_max_score"] = percentage_of_SOTA_reward
     cfg_to_log["num_params_evolutionary"] = num_params_evolutionary
