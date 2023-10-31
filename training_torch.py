@@ -2,15 +2,14 @@ import collections
 import os
 import time
 from datetime import datetime
-from typing import Callable, List
+from typing import Callable, List, Union, Tuple
 
 import jax
 
+print("jax devices", jax.devices())
 from models import Agent, BayesianAgent
 from utils import calculate_compression_ratio
 from omegaconf import OmegaConf
-
-print("jax devices", jax.devices())
 
 
 import random
@@ -34,6 +33,7 @@ cs = ConfigStore.instance()
 cs.store(name="default", node=TrainConfig)
 from utils import make_legs_longer
 from brax.spring.base import State, Transform, Motion
+from brax.base.envs import Env
 
 
 def write_to_csv(*, cfg_to_log: dict, path: str = "csv_logs/") -> None:
@@ -50,7 +50,7 @@ def write_to_csv(*, cfg_to_log: dict, path: str = "csv_logs/") -> None:
         f.write(",".join([str(v) for v in cfg_to_log.values()]) + "\n")
 
 
-@hydra.main(config_path=".", config_name="ant")
+@hydra.main(config_path="configs", config_name="ant")
 def main(cfg: DictConfig) -> None:
     np.random.seed(cfg.seed)
     random.seed(int(cfg.seed))
@@ -71,7 +71,7 @@ def main(cfg: DictConfig) -> None:
             items[k] = f(*[sd._asdict()[k] for sd in sds])
         return StepData(**items)
 
-    def make_one_state(state: State):
+    def make_one_state(state: State) -> State:
         from jaxlib.xla_extension import ArrayImpl
 
         new_state_dict = {}
@@ -101,7 +101,9 @@ def main(cfg: DictConfig) -> None:
             new_rollout.append(make_one_state(rollout[i]))
         return new_rollout
 
-    def save_rollout_to_html(env, rollout: List[State], html_name: str = None) -> None:
+    def save_rollout_to_html(
+        env: Env, rollout: List[State], html_name: str = None
+    ) -> None:
         if html_name != None:
             from brax.io import html
 
@@ -111,7 +113,9 @@ def main(cfg: DictConfig) -> None:
             with open(html_path, "w") as f:
                 f.write(html_data)
 
-    def eval_unroll(agent, env, length, html_name: str = None):
+    def eval_unroll(
+        agent: Union[BayesianAgent, Agent], env: Env, length: int, html_name: str = None
+    ) -> Tuple[int, float]:
         """Return number of episodes and average reward for a single unroll."""
         observation = env.reset()
         episodes = torch.zeros((), device=agent.device)
@@ -127,7 +131,13 @@ def main(cfg: DictConfig) -> None:
         save_rollout_to_html(env, rollout=rollout, html_name=html_name)
         return episodes, episode_reward / episodes
 
-    def train_unroll(agent, env, observation, num_unrolls, unroll_length):
+    def train_unroll(
+        agent: Union[BayesianAgent, Agent],
+        env: Env,
+        observation: torch.Tensor,
+        num_unrolls: int,
+        unroll_length: int,
+    ) -> Tuple[torch.Tensor]:
         """Return step data over multple unrolls."""
         sd = StepData([], [], [], [], [], [])
         for _ in range(num_unrolls):
@@ -148,7 +158,12 @@ def main(cfg: DictConfig) -> None:
         td = sd_map(torch.stack, sd)
         return observation, td
 
-    def eval_agent(agent, env, episode_length, html_name: str = None):
+    def eval_agent(
+        agent: Union[BayesianAgent, Agent],
+        env: Env,
+        episode_length: int,
+        html_name: str = None,
+    ) -> Tuple[float]:
         t = time.time()
         with torch.no_grad():
             episode_count, episode_reward = eval_unroll(
@@ -159,7 +174,9 @@ def main(cfg: DictConfig) -> None:
         eval_sps = env.num_envs * episode_length / duration
         return episode_reward, episode_count, episode_avg_length, eval_sps
 
-    def make_population_histogram(episode_rewards_list, mean_reward, wandb_prefix):
+    def make_population_histogram(
+        episode_rewards_list: List[float], mean_reward: float, wandb_prefix: str
+    ) -> None:
         import plotly.graph_objects as go
 
         fig = go.Figure()
@@ -186,8 +203,14 @@ def main(cfg: DictConfig) -> None:
         wandb.log({f"sampled_population_of_performances_{wandb_prefix}": fig})
 
     def eval_population(
-        agent, seed, env_name, num_envs, clipping_val, learning_rate, entropy_cost,
-    ):
+        agent: Union[BayesianAgent, Agent],
+        seed: int,
+        env_name: str,
+        num_envs: int,
+        clipping_val: float,
+        learning_rate: float,
+        entropy_cost: float,
+    ) -> None:
         episode_rewards_list_normal_legs = []
         episode_rewards_list_normal_legs_sanity_check = []
         episode_rewards_list_long_legs = []
@@ -292,7 +315,13 @@ def main(cfg: DictConfig) -> None:
             wandb_prefix=" sanity check, ",
         )
 
-    def make_scatter_plot(x, y, error_x_vals, error_y_vals, wandb_prefix):
+    def make_scatter_plot(
+        x: List[float],
+        y: List[float],
+        error_x_vals: List[float],
+        error_y_vals: List[float],
+        wandb_prefix: str,
+    ):
         import plotly.graph_objects as go
 
         # Fitting a straight line
@@ -333,7 +362,13 @@ def main(cfg: DictConfig) -> None:
             }
         )
 
-    def train(*, cfg, bayesian_agent_to_sample, progress_fn, wandb_prefix):
+    def train(
+        *,
+        cfg: DictConfig,
+        bayesian_agent_to_sample: BayesianAgent,
+        progress_fn: Callable,
+        wandb_prefix: str,
+    ):
         """Trains a policy via PPO."""
         number_of_cell_types = int(cfg.number_of_cell_types)
         env = envs.create(
@@ -541,38 +576,29 @@ def main(cfg: DictConfig) -> None:
     train_sps = []
     times = [datetime.now()]
 
-    def progress(num_steps, metrics, wandb_prefix, logging_population=True):
-        if logging_population == False:
-            wandb.log(
-                {
-                    f"{wandb_prefix}_losses/total_loss": metrics["losses/total_loss"],
-                    f"{wandb_prefix}_losses/total_policy_loss": metrics[
-                        "losses/total_policy_loss"
-                    ],
-                    f"{wandb_prefix}_losses/total_value_loss": metrics[
-                        "losses/total_value_loss"
-                    ],
-                    f"{wandb_prefix}_losses/total_entropy_loss": metrics[
-                        "losses/total_entropy_loss"
-                    ],
-                    f"{wandb_prefix}_eval/episode_reward": metrics[
-                        "eval/episode_reward"
-                    ],
-                    f"{wandb_prefix}_speed/eval_sps": metrics["speed/eval_sps"],
-                    f"{wandb_prefix}_speed/sps": metrics["speed/sps"],
-                },
-            )
-            times.append(datetime.now())
-            xdata.append(num_steps)
-            ydata.append(metrics["eval/episode_reward"].cpu())
-            eval_sps.append(metrics["speed/eval_sps"])
-            train_sps.append(metrics["speed/sps"])
-        elif logging_population == True:
-            wandb.log(
-                {"population_eval/episode_reward": metrics["eval/episode_reward"]},
-            )
-        else:
-            raise ValueError("logging_population must be a Boolean")
+    def progress(num_steps: str, metrics: dict, wandb_prefix: str):
+        times.append(datetime.now())
+        wandb.log(
+            {
+                f"{wandb_prefix}_losses/total_loss": metrics["losses/total_loss"],
+                f"{wandb_prefix}_losses/total_policy_loss": metrics[
+                    "losses/total_policy_loss"
+                ],
+                f"{wandb_prefix}_losses/total_value_loss": metrics[
+                    "losses/total_value_loss"
+                ],
+                f"{wandb_prefix}_losses/total_entropy_loss": metrics[
+                    "losses/total_entropy_loss"
+                ],
+                f"{wandb_prefix}_eval/episode_reward": metrics["eval/episode_reward"],
+                f"{wandb_prefix}_speed/eval_sps": metrics["speed/eval_sps"],
+                f"{wandb_prefix}_speed/sps": metrics["speed/sps"],
+            },
+        )
+        xdata.append(num_steps)
+        ydata.append(metrics["eval/episode_reward"].cpu())
+        eval_sps.append(metrics["speed/eval_sps"])
+        train_sps.append(metrics["speed/sps"])
 
     agent, num_params_evolutionary, percentage_of_SOTA_reward = train(
         cfg=cfg,

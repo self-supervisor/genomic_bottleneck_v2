@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 
-def find_num_neuron_per_type(num_features, num_types):
+def find_num_neuron_per_type(num_features: int, num_types: int) -> np.ndarray:
     features = int(num_features)
     types = int(num_types)
 
@@ -20,7 +20,7 @@ def find_num_neuron_per_type(num_features, num_types):
     return arr.astype(np.int64)
 
 
-def make_legs_longer(length_adjustment=1.5):
+def make_legs_longer(length_adjustment: float = 1.5) -> None:
     import os
     import brax
 
@@ -62,64 +62,10 @@ def to1d_CNN(a, x, y, z, out_channel, in_channel, num_out, num_inp):
     )
 
 
-# def gather2D(tensor, indices):
-
-#     old_shape = indices.shape[:-1]
-#     tensor = gather_nd_torch(tensor, indices, batch_dim=1)
-#     return torch.reshape(tensor, old_shape)
-
-
 def gather2D(tensor, indices, indices_flat):
     old_shape = indices.shape[:-1]
     tensor = gather_nd_torch(tensor, indices, indices_flat, batch_dim=1)
     return torch.reshape(tensor, old_shape)
-
-
-# def gather_nd_torch(params, indices, batch_dim=0):
-
-#     expand = batch_dim == 0
-#     if expand:
-#         params = torch.unsqueeze(params, 0)
-#         indices = torch.unsqueeze(indices, 0)
-#         batch_dim = 1
-
-#     batch_dims = params.size()[:batch_dim]  # [b1, ..., bn]
-#     batch_size = np.cumprod(list(batch_dims))[-1]  # b1 * ... * bn
-#     c_dim = params.size()[-1]  # c
-#     grid_dims = params.size()[batch_dim:-1]  # [g1, ..., gm]
-#     n_indices = indices.size()[batch_dim:-1]  # x
-#     org_indices = indices
-#     n_indices = np.cumprod(list(n_indices))[-1]
-#     n_pos = indices.size(-1)  # m
-#     try:
-#         last_dim = params.size()[batch_dim+n_pos:][0]
-#     except:
-#         last_dim = 1
-#     # reshape leadning batch dims to a single batch dim
-#     params = params.reshape(batch_size, *grid_dims, c_dim)
-#     indices = indices.reshape(batch_size, n_indices, n_pos)
-#     idx_arr = [[] for _ in range(n_pos+1)]
-#     for i in range(batch_size):
-#         idx_arr[0].append([i for _ in range(len(indices[i][:,0]))])
-#         for j in range(n_pos):
-#             idx_arr[j+1].append(indices[i][:,j].numpy())
-
-#     gather_dims = idx_arr
-
-
-#     try:
-#         gather_dims_flat = to1d_CNN(np.array(gather_dims[1]),np.array(gather_dims[2]),np.array(gather_dims[3]),np.array(gather_dims[4]),(gather_dims[1][0][-1]+1),(gather_dims[2][0][-1]+1),(gather_dims[3][0][-1]+1),(gather_dims[4][0][-1]+1))
-#     except:
-#         gather_dims_flat = to1d(np.array(gather_dims[2]),np.array(gather_dims[1]),np.array(gather_dims[0]),(gather_dims[1][-1]+1),(gather_dims[2][-1]+1))
-
-#     gathered = torch.index_select(params.flatten(),0,torch.tensor(gather_dims_flat.flatten()).to(params.flatten().device))
-
-#     gathered = gathered.reshape(*batch_dims, *org_indices.size()[batch_dim:-1],last_dim)
-
-
-#     gathered = torch.squeeze(gathered)
-
-#     return gathered
 
 
 def gather_nd_torch(params, indices, gather_dims_flat, batch_dim=0):
@@ -255,7 +201,7 @@ def get_indices_CNN(n_neurons_arr, unit_types_arr):
     return indices
 
 
-def calculate_parameters(mlp) -> int:
+def calculate_parameters(mlp: List[int]) -> int:
     # The number of parameters between two layers is the product of the
     # number of neurons in these two layers, plus the number of neurons
     # in the current layer (for bias terms).
