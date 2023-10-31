@@ -11,7 +11,71 @@ from blitz.modules.weight_sampler import (
 )
 from blitz.utils import variational_estimator
 
-from utils import *
+from utils import (
+    gather_nd_torch_dims_flat,
+    gather2D,
+    find_num_neuron_per_type,
+    get_indices,
+)
+
+
+class TrainableRandomDistribution_weight_share(nn.Module):
+    def __init__(self, mu, rho, indices):
+        super().__init__()
+
+        self.weight_mu_share = mu
+        self.weight_rho_share = rho
+        self.indices = indices
+
+        self.indices.flat = gather_nd_torch_dims_flat(
+            self.weight_mu_share, self.indices, batch_dim=1
+        )
+
+        self.mu = gather2D(self.weight_mu_share, self.indices, self.indices.flat)
+        self.rho = gather2D(self.weight_rho_share, self.indices, self.indices.flat)
+        self.register_buffer("eps_w", torch.Tensor(self.mu.shape))
+        self.sigma = None
+        self.w = None
+        self.pi = np.pi
+
+    def sample(self):
+        """
+        Samples weights by sampling form a Normal distribution, multiplying by a sigma, which is
+        a function from a trainable parameter, and adding a mean
+        sets those weights as the current ones
+        returns:
+            torch.tensor with same shape as self.mu and self.rho
+        """
+
+        self.mu = gather2D(self.weight_mu_share, self.indices, self.indices.flat)
+        self.rho = gather2D(self.weight_rho_share, self.indices, self.indices.flat)
+
+        self.eps_w.data.normal_()
+        self.sigma = torch.log1p(torch.exp(self.rho))
+        self.w = self.mu + self.sigma * self.eps_w
+        return self.w[0].permute(1, 0)
+
+    def log_posterior(self, w=None):
+        """
+        Calculates the log_likelihood for each of the weights sampled as a part of the complexity cost
+        returns:
+            torch.tensor with shape []
+        """
+
+        assert (
+            self.w is not None
+        ), "You can only have a log posterior for W if you've already sampled it"
+        if w is None:
+            w = self.w
+
+        log_sqrt2pi = np.log(np.sqrt(2 * self.pi))
+        log_posteriors = (
+            -log_sqrt2pi
+            - torch.log(self.sigma)
+            - (((w - self.mu) ** 2) / (2 * self.sigma ** 2))
+            - 0.5
+        )
+        return log_posteriors.sum()
 
 
 class BayesianLinear(BayesianModule):

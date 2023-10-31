@@ -28,7 +28,6 @@ from utils import calculate_compression_ratio
 
 cs = ConfigStore.instance()
 cs.store(name="default", node=TrainConfig)
-from brax.base.envs import Env
 from brax.spring.base import Motion, State, Transform
 
 from utils import make_legs_longer
@@ -76,8 +75,7 @@ def main(cfg: DictConfig) -> None:
         for key in state.__dict__.keys():
             if type(state.__dict__[key]) == Transform:
                 new_transform = Transform(
-                    pos=state.__dict__[key].pos[0],
-                    rot=state.__dict__[key].rot[0],
+                    pos=state.__dict__[key].pos[0], rot=state.__dict__[key].rot[0],
                 )
                 new_state_dict[key] = new_transform
             elif type(state.__dict__[key]) == ArrayImpl:
@@ -85,8 +83,7 @@ def main(cfg: DictConfig) -> None:
                 new_state_dict[key] = new_jnp_array
             elif type(state.__dict__[key]) == Motion:
                 new_motion = Motion(
-                    ang=state.__dict__[key].ang[0],
-                    vel=state.__dict__[key].vel[0],
+                    ang=state.__dict__[key].ang[0], vel=state.__dict__[key].vel[0],
                 )
                 new_state_dict[key] = new_motion
             elif state.__dict__[key] == None:
@@ -101,9 +98,7 @@ def main(cfg: DictConfig) -> None:
             new_rollout.append(make_one_state(rollout[i]))
         return new_rollout
 
-    def save_rollout_to_html(
-        env: Env, rollout: List[State], html_name: str = None
-    ) -> None:
+    def save_rollout_to_html(env, rollout: List[State], html_name: str = None) -> None:
         if html_name != None:
             from brax.io import html
 
@@ -114,7 +109,7 @@ def main(cfg: DictConfig) -> None:
                 f.write(html_data)
 
     def eval_unroll(
-        agent: Union[BayesianAgent, Agent], env: Env, length: int, html_name: str = None
+        agent: Union[BayesianAgent, Agent], env, length: int, html_name: str = None
     ) -> Tuple[int, float]:
         """Return number of episodes and average reward for a single unroll."""
         observation = env.reset()
@@ -133,7 +128,7 @@ def main(cfg: DictConfig) -> None:
 
     def train_unroll(
         agent: Union[BayesianAgent, Agent],
-        env: Env,
+        env,
         observation: torch.Tensor,
         num_unrolls: int,
         unroll_length: int,
@@ -160,7 +155,7 @@ def main(cfg: DictConfig) -> None:
 
     def eval_agent(
         agent: Union[BayesianAgent, Agent],
-        env: Env,
+        env,
         episode_length: int,
         html_name: str = None,
     ) -> Tuple[float]:
@@ -182,8 +177,7 @@ def main(cfg: DictConfig) -> None:
         fig = go.Figure()
         fig.add_trace(
             go.Histogram(
-                x=episode_rewards_list,
-                name="histogram of sample network performance",
+                x=episode_rewards_list, name="histogram of sample network performance",
             )
         )
         fig.add_trace(
@@ -211,6 +205,8 @@ def main(cfg: DictConfig) -> None:
         clipping_val: float,
         learning_rate: float,
         entropy_cost: float,
+        networks_to_sample: int,
+        samples_to_take: int,
     ) -> None:
         episode_rewards_list_normal_legs = []
         episode_rewards_list_normal_legs_sanity_check = []
@@ -251,14 +247,14 @@ def main(cfg: DictConfig) -> None:
 
         make_legs_longer(length_adjustment=1.0)
 
-        for i in tqdm(range(100)):
+        for i in tqdm(range(networks_to_sample)):
             sampled_agent = agent.sample_vanilla_agent(
                 clipping_val, learning_rate, entropy_cost
             )
             current_agent_returns_normal_legs = []
             current_agent_returns_normal_legs_sanity_check = []
             current_agent_returns_long_legs = []
-            for _ in tqdm(range(10)):
+            for _ in tqdm(range(samples_to_take)):
                 episode_reward, _, _, _ = eval_agent(sampled_agent, env, episode_length)
                 current_agent_returns_normal_legs.append(episode_reward.cpu().numpy())
 
@@ -354,8 +350,7 @@ def main(cfg: DictConfig) -> None:
         )
 
         fig.update_layout(
-            xaxis_title="normal legs return",
-            yaxis_title="long legs return",
+            xaxis_title="normal legs return", yaxis_title="long legs return",
         )
 
         wandb.log(
@@ -625,6 +620,8 @@ def main(cfg: DictConfig) -> None:
             clipping_val=cfg.clipping_val,
             learning_rate=cfg.learning_rate,
             entropy_cost=cfg.entropy_cost,
+            networks_to_sample=cfg.networks_to_sample,
+            samples_to_take=cfg.samples_to_take,
         )
 
     if cfg.is_weight_sharing != False:

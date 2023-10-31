@@ -24,3 +24,5 @@ hidden_size: 128
 SOTA_performance: 8706
 min_performance: -724
 eval_population: True
+samples_to_take: 3
+networks_to_sample: 3
