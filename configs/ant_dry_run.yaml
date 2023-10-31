@@ -7,7 +7,7 @@ num_update_epochs: 4
 num_minibatches: 32
 unroll_length: 5
 number_of_cell_types: 64
-is_weight_sharing: false
+is_weight_sharing: true
 clipping_val: 0.3
 within_lifetime_clipping_val: 0.3
 within_lifetime_learning_rate: 3e-4
