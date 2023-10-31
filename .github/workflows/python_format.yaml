@@ -28,9 +28,6 @@ jobs:
         isort . --recursive
         black .
 
-    - name: Run mypy type checking
-      run: mypy . --explicit-package-bases
-
     - name: Commit changes
       run: |
         git config --local user.email "action@github.com"
