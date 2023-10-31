@@ -22,6 +22,7 @@ def find_num_neuron_per_type(num_features: int, num_types: int) -> np.ndarray:
 
 def make_legs_longer(length_adjustment: float = 1.5) -> None:
     import os
+
     import brax
 
     brax_path = os.path.dirname(brax.__file__)

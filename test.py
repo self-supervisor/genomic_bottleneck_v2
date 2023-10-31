@@ -1,5 +1,5 @@
-from Custom_layers import BayesianLinear
 import torch
+from Custom_layers import BayesianLinear
 
 
 def test_number_of_cell_types_floors():

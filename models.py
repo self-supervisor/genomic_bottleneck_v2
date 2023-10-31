@@ -26,14 +26,18 @@ class Agent(nn.Module):
 
         policy = []
         for w1, w2 in zip(policy_layers, policy_layers[1:]):
-            policy.append(nn.Linear(w1, w2),)
+            policy.append(
+                nn.Linear(w1, w2),
+            )
             policy.append(nn.SiLU())
         policy.pop()  # drop the final activation
         self.policy = nn.Sequential(*policy)
 
         value = []
         for w1, w2 in zip(value_layers, value_layers[1:]):
-            value.append(nn.Linear(w1, w2),)
+            value.append(
+                nn.Linear(w1, w2),
+            )
             value.append(nn.SiLU())
         value.pop()  # drop the final activation
         self.value = nn.Sequential(*value)
@@ -453,7 +457,8 @@ class BayesianAgent(nn.Module):
             if type(a_layer) == BayesianLinear:
                 policy_layers.append(
                     self.construct_vanilla_layer(
-                        a_layer.weight_sampler.sample(), a_layer.bias_sampler.sample(),
+                        a_layer.weight_sampler.sample(),
+                        a_layer.bias_sampler.sample(),
                     )
                 )
                 policy_layers.append(nn.SiLU())
@@ -461,7 +466,8 @@ class BayesianAgent(nn.Module):
             if type(a_layer) == BayesianLinear:
                 value_layers.append(
                     self.construct_vanilla_layer(
-                        a_layer.weight_sampler.sample(), a_layer.bias_sampler.sample(),
+                        a_layer.weight_sampler.sample(),
+                        a_layer.bias_sampler.sample(),
                     )
                 )
                 value_layers.append(nn.SiLU())

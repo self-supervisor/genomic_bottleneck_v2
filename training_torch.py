@@ -2,38 +2,36 @@ import collections
 import os
 import time
 from datetime import datetime
-from typing import Callable, List, Union, Tuple
+from typing import Callable, List, Tuple, Union
 
 import jax
 
 print("jax devices", jax.devices())
-from models import Agent, BayesianAgent
-from utils import calculate_compression_ratio
-from omegaconf import OmegaConf
-
-
 import random
 
-import scipy
+import hydra
 import numpy as np
+import scipy
 import torch
 import wandb
 from brax import envs
 from brax.envs.wrappers import gym as gym_wrapper
 from brax.envs.wrappers import torch as torch_wrapper
+from config import TrainConfig
+from hydra.core.config_store import ConfigStore
+from omegaconf import DictConfig, OmegaConf
 from torch import optim
 from tqdm import tqdm
-import hydra
-from hydra.core.config_store import ConfigStore
 
-from omegaconf import DictConfig
-from config import TrainConfig
+from models import Agent, BayesianAgent
+from utils import calculate_compression_ratio
 
 cs = ConfigStore.instance()
 cs.store(name="default", node=TrainConfig)
-from utils import make_legs_longer
-from brax.spring.base import State, Transform, Motion
 from brax.base.envs import Env
+from brax.spring.base import Motion, State, Transform
+
+from utils import make_legs_longer
 
 
 def write_to_csv(*, cfg_to_log: dict, path: str = "csv_logs/") -> None:
@@ -78,7 +76,8 @@ def main(cfg: DictConfig) -> None:
         for key in state.__dict__.keys():
             if type(state.__dict__[key]) == Transform:
                 new_transform = Transform(
-                    pos=state.__dict__[key].pos[0], rot=state.__dict__[key].rot[0],
+                    pos=state.__dict__[key].pos[0],
+                    rot=state.__dict__[key].rot[0],
                 )
                 new_state_dict[key] = new_transform
             elif type(state.__dict__[key]) == ArrayImpl:
@@ -86,7 +85,8 @@ def main(cfg: DictConfig) -> None:
                 new_state_dict[key] = new_jnp_array
             elif type(state.__dict__[key]) == Motion:
                 new_motion = Motion(
-                    ang=state.__dict__[key].ang[0], vel=state.__dict__[key].vel[0],
+                    ang=state.__dict__[key].ang[0],
+                    vel=state.__dict__[key].vel[0],
                 )
                 new_state_dict[key] = new_motion
             elif state.__dict__[key] == None:
@@ -182,7 +182,8 @@ def main(cfg: DictConfig) -> None:
         fig = go.Figure()
         fig.add_trace(
             go.Histogram(
-                x=episode_rewards_list, name="histogram of sample network performance",
+                x=episode_rewards_list,
+                name="histogram of sample network performance",
             )
         )
         fig.add_trace(
@@ -353,7 +354,8 @@ def main(cfg: DictConfig) -> None:
         )
 
         fig.update_layout(
-            xaxis_title="normal legs return", yaxis_title="long legs return",
+            xaxis_title="normal legs return",
+            yaxis_title="long legs return",
         )
 
         wandb.log(
