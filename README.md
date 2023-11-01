@@ -39,10 +39,10 @@ To get phenotypic diversity plot:
 
 To sweep through different compressions and environments run:
 
-    ```
+    ```bash
     qsub UGE_job.sh
     ```
 
-README generated with GPT-4.
-
 Code for Bayesian bottleneck layes was given to me by Divyansha.
+
+README generated with GPT-4.
