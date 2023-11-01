@@ -45,6 +45,8 @@ To sweep through different compressions and environments run:
 qsub UGE_job.sh
 ```
 
+Then edit the code in plot.py to go through the CSVs and plot them.
+
 Code for Bayesian bottleneck layes was given to me by Divyansha.
 
 README generated with GPT-4.

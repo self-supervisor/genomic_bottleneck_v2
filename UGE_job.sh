@@ -20,4 +20,4 @@ CONFIG_NAME=${CONFIG_NAMES[$CONFIG_INDEX]}
 SEED=${SEEDS[$SEED_INDEX]}
 CELL_TYPE=${NUM_CELL_TYPES[$CELL_INDEX]}
 
-python training_torch.py --config-name=$CONFIG_NAME seed=$SEED number_of_cell_types=$CELL_TYPE hidden_size=128
+python training_torch.py --config-name=$CONFIG_NAME eval_population=False seed=$SEED number_of_cell_types=$CELL_TYPE hidden_size=128
