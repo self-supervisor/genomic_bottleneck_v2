@@ -11,6 +11,7 @@ is_weight_sharing: true
 clipping_val: 0.3
 within_lifetime_clipping_val: 0.3
 within_lifetime_learning_rate: 3e-4
+wandb_prefix: "weight_sharing"
 env_name: "halfcheetah"
 complexity_cost: 0.0001
 episode_length: 1000
@@ -22,3 +23,6 @@ discounting: 0.95
 hidden_size: 128
 SOTA_performance: 4838
 min_performance: -724
+eval_population: True
+samples_to_take: 10
+networks_to_sample: 100

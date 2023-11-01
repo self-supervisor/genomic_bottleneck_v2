@@ -7,10 +7,11 @@ num_update_epochs: 4
 num_minibatches: 32
 unroll_length: 5
 number_of_cell_types: 64
-is_weight_sharing: true
+is_weight_sharing: True
 clipping_val: 0.3
 within_lifetime_clipping_val: 0.3
 within_lifetime_learning_rate: 3e-4
+wandb_prefix: "weight_sharing"
 env_name: "ant"
 complexity_cost: 0
 episode_length: 1000
@@ -23,3 +24,5 @@ hidden_size: 128
 SOTA_performance: 8706
 min_performance: -724
 eval_population: True
+samples_to_take: 10
+networks_to_sample: 100
