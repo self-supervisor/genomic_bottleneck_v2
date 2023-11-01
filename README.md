@@ -33,15 +33,15 @@ Run a single example (approximately 20 minutes):
 
 To get phenotypic diversity plot:
 
-    ```bash
-    python training_torch.py --config-name ant
-    ```
+```bash
+python training_torch.py --config-name ant
+```
 
 To sweep through different compressions and environments run:
 
-    ```bash
-    qsub UGE_job.sh
-    ```
+```bash
+qsub UGE_job.sh
+```
 
 Code for Bayesian bottleneck layes was given to me by Divyansha.
 
