@@ -37,6 +37,8 @@ To get phenotypic diversity plot:
 python training_torch.py --config-name ant
 ```
 
+### Reproducing Plots
+
 To sweep through different compressions and environments run:
 
 ```bash
