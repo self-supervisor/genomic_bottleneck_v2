@@ -44,3 +44,5 @@ To sweep through different compressions and environments run:
     ```
 
 README generated with GPT-4.
+
+Code for Bayesian bottleneck layes was given to me by Divyansha.
