@@ -10,6 +10,8 @@ Ensure you have `conda` installed on your machine. You can download it from [her
 
 ### Installation
 
+This is what worked on Elzar. It might be different for you depending on your CUDA versions.
+
 1. Create and activate a new conda environment:
     ```bash
     conda env create -f environment.yml
