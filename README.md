@@ -29,9 +29,9 @@ This is what worked on Elzar. It might be different for you depending on your CU
 ### Quick Start
 
 Run a single example (approximately 20 minutes):
-    ```bash
-    python training_torch.py --config-name=ant eval_population=False
-    ```
+```bash
+python training_torch.py --config-name=ant eval_population=False
+```
 
 To get phenotypic diversity plot:
 
