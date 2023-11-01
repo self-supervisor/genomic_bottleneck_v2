@@ -1,9 +1,9 @@
-from datetime import datetime
-from typing import Tuple, List
-
-import pandas as pd
-import matplotlib.pyplot as plt
 import glob
+from datetime import datetime
+from typing import List, Tuple
+
+import matplotlib.pyplot as plt
+import pandas as pd
 
 
 def get_timestamp_from_filename(*, filename: str) -> datetime:
