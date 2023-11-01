@@ -47,7 +47,9 @@ To sweep through different compressions and environments run:
 qsub UGE_job.sh
 ```
 
-Then edit the code in plot.py to go through the CSVs and plot them.
+You should get results like [this](https://wandb.ai/self-supervisor/brax-cshl/reports/Genomic-Bottleneck-v2-Nov-1st--Vmlldzo1ODQyMzA3?accessToken=wh7ltbcurtd2xd8nekl1udteia84p7xjjw8ytq5vj1t6bj8hwqjmth8ux1fpwwbh)
+
+Then edit the code in plot.py to go through the CSVs and plot them for the scatter plots.
 
 Code for Bayesian bottleneck layes was given to me by Divyansha.
 
