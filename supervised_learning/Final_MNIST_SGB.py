@@ -5,6 +5,7 @@ import itertools
 import pickle
 import numpy as np
 from datetime import datetime
+
 from utils import *
 from Custom_layers import *
 
@@ -30,8 +31,8 @@ from blitz.modules.weight_sampler import (
 # TODO: take as input manually defined hyperparameters
 parser = argparse.ArgumentParser()
 parser.add_argument("--array_id", type=int, default=0)
-parser.add_argument("--data_path", type=str)
-parser.add_argument("--save_path", type=str)
+parser.add_argument("--data_path", type=str, default="data/")
+parser.add_argument("--save_path", type=str, default="results/")
 
 args = parser.parse_args()
 
