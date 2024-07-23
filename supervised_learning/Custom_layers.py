@@ -19,7 +19,6 @@ from utils import *
 
 
 class TrainableRandomDistribution_weight_share(nn.Module):
-
     def __init__(self, mu, rho, indices):
         super().__init__()
 
@@ -79,7 +78,6 @@ class TrainableRandomDistribution_weight_share(nn.Module):
 
 
 class TrainableRandomDistribution_weight_share_CNN(nn.Module):
-
     def __init__(self, mu, rho, indices):
         super().__init__()
 
@@ -655,6 +653,25 @@ class BayesianLinear(BayesianModule):
             return F.linear(x, self.weight_mu, self.bias_mu)
         else:
             return F.linear(x, self.weight_mu, torch.zeros(self.out_features))
+
+    def sample_layer_weights(self, expected_value=True):
+        if self.WS and expected_value:
+            w = gather2D(self.weight_mu_share, self.indices)
+
+            if self.bias:
+                b = self.bias_mu
+            else:
+                b = torch.zeros(self.out_features)
+
+        else:
+            w = self.weight_sampler.sample()
+
+            if self.bias:
+                b = self.bias_sampler.sample()
+            else:
+                b = torch.zeros(self.out_features)
+
+        return (w, b)
 
 
 class BayesianConv2d(BayesianModule):
