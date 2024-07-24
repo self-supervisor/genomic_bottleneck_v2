@@ -585,6 +585,8 @@ class BayesianLinear(BayesianModule):
             indices = get_indices(
                 in_neuron_type_ids, in_features, out_neuron_type_ids, out_features
             )
+            self.indices = indices
+
             self.weight_mu_share = nn.Parameter(
                 torch.Tensor(1, neuron_types_in, neuron_types_out).normal_(
                     posterior_mu_init, 0.1
