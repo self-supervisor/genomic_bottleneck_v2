@@ -1,28 +1,24 @@
-import os
 import argparse
-import random
 import itertools
+import os
 import pickle
-import numpy as np
+import random
 from datetime import datetime
 
-from utils import *
-from Custom_layers import *
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torchvision.datasets as dsets
 import torchvision.transforms as transforms
-
 from blitz.losses import kl_divergence_from_nn
-from blitz.utils import variational_estimator
 from blitz.modules.base_bayesian_module import BayesianModule
-from blitz.modules.weight_sampler import (
-    TrainableRandomDistribution,
-    PriorWeightDistribution,
-)
+from blitz.modules.weight_sampler import (PriorWeightDistribution,
+                                          TrainableRandomDistribution)
+from blitz.utils import variational_estimator
+from Custom_layers import *
+from utils import *
 
 #######################################################################################
 ###  Use job array number to index which combination of hyperparameters to use
@@ -161,7 +157,7 @@ l = [module for module in classifier.modules() if isinstance(module, BayesianLin
 test_acc = []
 loss_arr = []
 iteration = 0
-for epoch in range(100):
+for epoch in range(1):
     for i, (datapoints, labels) in enumerate(train_loader):
         optimizer.zero_grad()
         datapoints = datapoints.flatten(1, -1)
@@ -223,18 +219,18 @@ with open(os.path.join(dir_name, "weights.pkl"), "wb") as f:
 
 # saves the mean network
 
-for i, layer in enumerate(l):
-    weights[name[i]] = {}
-    weights[name[i]]["w"], weights[name[i]]["b"] = layer.sample_layer_weights(
-        expected_value=True
-    )
+# for i, layer in enumerate(l):
+#     weights[name[i]] = {}
+#     weights[name[i]]["w"], weights[name[i]]["b"] = layer.sample_layer_weights(
+#         expected_value=True
+#     )
 
 
-with open(os.path.join(dir_name, "weights_mean.pkl"), "wb") as f:
-    pickle.dump(weights, f)
+# with open(os.path.join(dir_name, "weights_mean.pkl"), "wb") as f:
+#     pickle.dump(weights, f)
 
 # save the model
-torch.save(classifier.state_dict(), os.path.join(dir_name, "model.pth"))
+# torch.save(classifier.state_dict(), os.path.join(dir_name, "model.pth"))
 
 # saves 10 sampled 10 networks
 for model_num_samp in range(10):

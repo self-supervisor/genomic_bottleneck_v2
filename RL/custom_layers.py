@@ -5,18 +5,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 from blitz.losses import kl_divergence_from_nn
 from blitz.modules.base_bayesian_module import BayesianModule, BayesianRNN
-from blitz.modules.weight_sampler import (
-    PriorWeightDistribution,
-    TrainableRandomDistribution,
-)
+from blitz.modules.weight_sampler import (PriorWeightDistribution,
+                                          TrainableRandomDistribution)
 from blitz.utils import variational_estimator
-
-from utils import (
-    find_num_neuron_per_type,
-    gather2D,
-    gather_nd_torch_dims_flat,
-    get_indices,
-)
+from utils import (find_num_neuron_per_type, gather2D,
+                   gather_nd_torch_dims_flat, get_indices)
 
 
 class TrainableRandomDistribution_weight_share(nn.Module):

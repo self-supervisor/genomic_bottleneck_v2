@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from blitz.losses.kl_divergence import kl_divergence_from_nn
-
 from custom_layers import BayesianLinear
 
 

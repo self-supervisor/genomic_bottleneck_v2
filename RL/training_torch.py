@@ -17,19 +17,17 @@ import wandb
 from brax import envs
 from brax.envs.wrappers import gym as gym_wrapper
 from brax.envs.wrappers import torch as torch_wrapper
+from config import TrainConfig
 from hydra.core.config_store import ConfigStore
+from models import Agent, BayesianAgent
 from omegaconf import DictConfig, OmegaConf
 from torch import optim
 from tqdm import tqdm
-
-from config import TrainConfig
-from models import Agent, BayesianAgent
 from utils import calculate_compression_ratio
 
 cs = ConfigStore.instance()
 cs.store(name="default", node=TrainConfig)
 from brax.spring.base import Motion, State, Transform
-
 from utils import make_legs_longer
 
 
