@@ -585,7 +585,6 @@ class BayesianLinear(BayesianModule):
             indices = get_indices(
                 in_neuron_type_ids, in_features, out_neuron_type_ids, out_features
             )
-            self.indices = indices
 
             self.weight_mu_share = nn.Parameter(
                 torch.Tensor(1, neuron_types_in, neuron_types_out).normal_(
@@ -596,6 +595,11 @@ class BayesianLinear(BayesianModule):
                 torch.Tensor(1, neuron_types_in, neuron_types_out).normal_(
                     posterior_rho_init, 0.1
                 )
+            )
+
+            self.indices = indices
+            self.indices.flat = gather_nd_torch_dims_flat(
+                self.weight_mu_share, self.indices, batch_dim=1
             )
 
             self.weight_sampler = TrainableRandomDistribution_weight_share(
@@ -658,7 +662,7 @@ class BayesianLinear(BayesianModule):
 
     def sample_layer_weights(self, expected_value=True):
         if self.WS and expected_value:
-            w = gather2D(self.weight_mu_share, self.indices)
+            w = gather2D(self.weight_mu_share, self.indices, self.indices.flat)
 
             if self.bias:
                 b = self.bias_mu
