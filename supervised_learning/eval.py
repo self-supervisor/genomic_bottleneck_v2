@@ -15,12 +15,13 @@ import torchvision.datasets as dsets
 import torchvision.transforms as transforms
 from torchvision import datasets, transforms
 
+
 parser = argparse.ArgumentParser(description="Main script to train an agent")
 parser.add_argument("--array_id", type=int, default=0, help="ID for this array job")
 args = parser.parse_args()
 
 
-save_path = "./WS-BNN/results_Big_MLP_mean_exp"
+save_path = "./results"
 
 
 date = datetime.now().strftime("%Y-%m-%d")
@@ -43,14 +44,12 @@ model_cf_arr = [
     "sampled_8",
     "sampled_9",
 ]
-# ratio_arr = [1]
 
 save_expected_arr = [True]
 
 
 para_comb = list(itertools.product(seed_arr, ratio_arr, model_cf_arr))
 (seed, ratio, model_cf) = para_comb[args.array_id - 1]
-print(model_cf)
 
 
 class MLP(torch.nn.Module):
@@ -168,7 +167,6 @@ def test(model, device, test_loader):
 
 
 if __name__ == "__main__":
-
     random.seed(seed)
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -188,9 +186,9 @@ if __name__ == "__main__":
     ]
 
     for exp in exp_folder:
+        print(exp)
         if f"compression_{ratio}_" in exp and f"seed_{seed}" in exp:
             file_name = os.path.join(home_path, exp)
-            print(file_name)
             with open(os.path.join(file_name, f"weights_{model_cf}.pkl"), "rb") as file:
                 weights = pickle.load(file)
 

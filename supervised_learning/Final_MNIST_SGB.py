@@ -195,6 +195,7 @@ for epoch in range(1):
 
             np.save(f"{dir_name}/test_acc", test_acc)
             np.save(f"{dir_name}/loss_arr", loss_arr)
+            break
 
 
 #######################################################################################
