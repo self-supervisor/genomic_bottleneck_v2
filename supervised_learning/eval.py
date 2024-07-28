@@ -1,18 +1,18 @@
-import argparse
-import itertools
 import os
-import pickle
-import random
 from datetime import datetime
-
+import argparse
+import random
+import itertools
+import pickle
 import numpy as np
-import scipy.io as sio
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torchvision.datasets as dsets
 import torchvision.transforms as transforms
+import scipy.io as sio
 from torchvision import datasets, transforms
 
 
@@ -29,7 +29,7 @@ date_now = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
 
 
 # set hyperparameters for this experiment
-seed_arr = [0, 1, 2]
+seed_arr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 ratio_arr = [30, 50, 150, 300, 600, 1000, 1500]
 model_cf_arr = [
     "mean",
@@ -176,9 +176,10 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    number_of_epochs = 30
+    number_of_epochs = 1
 
-    home_path = "results/2024-07-24/"
+    home_path = "./results/2024-07-26"
+
     exp_folder = [
         name
         for name in os.listdir(home_path)
