@@ -158,7 +158,8 @@ l = [module for module in classifier.modules() if isinstance(module, BayesianLin
 test_acc = []
 loss_arr = []
 iteration = 0
-for epoch in range(100):
+
+for epoch in range(3):
     for i, (datapoints, labels) in enumerate(train_loader):
         optimizer.zero_grad()
         datapoints = datapoints.flatten(1, -1)
