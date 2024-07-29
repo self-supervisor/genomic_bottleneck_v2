@@ -11,4 +11,4 @@ module load miniconda/3
 conda activate py38
 
 # Run the Python script
-python Final_MNIST_SGB.py --array_id $SLURM_ARRAY_TASK_ID --data_path "data/" --save_path "results/"  
+python Final_MNIST_SGB.py --array_id $SLURM_ARRAY_TASK_ID --data_path "data/" --save_path "/network/scratch/a/augustine.mavor-parker/MNIST_results/"  
