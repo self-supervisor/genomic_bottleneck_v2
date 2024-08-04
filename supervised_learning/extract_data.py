@@ -1,83 +1,96 @@
-import os
+import pandas as pd
 import numpy as np
-import scipy.io as sio
 from scipy.stats import sem
 
-def extract_details(directory):
-    """ Extract compression level and seed number from directory name, validating the structure. """
-    print(f"Extracting details from directory: {directory}")
-    # Check if the directory name conforms to expected pattern
-    if 'compression' in directory and 'seed' in directory:
-        parts = directory.split('_')
-        try:
-            compression_index = parts.index('compression') + 1
-            seed_index = parts.index('seed') + 1
-            compression = int(parts[compression_index])
-            seed = int(parts[seed_index])
-            print(f"Extracted compression: {compression}, seed: {seed}")
-            return compression, seed
-        except (ValueError, IndexError):
-            print(f"Skipping directory due to parsing error: {directory}")
-    else:
-        print(f"Directory does not match expected pattern: {directory}")
-    return None, None
 
-def load_data(directory):
-    """ Load data from both 'sampled' and 'mean' .mat files, handling directory structure variations. """
-    sampled_results = {}
-    mean_results = {}
-    print(f"Loading data from directory: {directory}")
-    for subdir, _, files in os.walk(directory):
-        compression, seed = extract_details(subdir)
-        if compression is None or seed is None:
-            continue  # Skip directories that do not match the expected naming convention
-        for file in files:
-            full_path = os.path.join(subdir, file)
-            if file.startswith("sampled") and file.endswith(".mat"):
-                print(f"Processing sampled file: {file}")
-                data = sio.loadmat(full_path)['CorrectPreTestBatch'][0][0] / 10000
-                if compression not in sampled_results:
-                    sampled_results[compression] = {}
-                if seed not in sampled_results[compression]:
-                    sampled_results[compression][seed] = []
-                sampled_results[compression][seed].append(data)
-            elif file == "mean_finetune_GPU_every.mat":
-                print(f"Processing mean file: {file}")
-                data = sio.loadmat(full_path)['CorrectPreTestBatch'][0][0] / 10000
-                if compression not in mean_results:
-                    mean_results[compression] = []
-                mean_results[compression].append(data)
-    print(f"Loaded {len(sampled_results)} compression levels for sampled data")
-    print(f"Loaded {len(mean_results)} compression levels for mean data")
-    return sampled_results, mean_results
+def load_data_from_csv(sampled_file, mean_file):
+    sampled_df = pd.read_csv(sampled_file)
+    mean_df = pd.read_csv(mean_file)
+    return sampled_df, mean_df
 
-def calculate_statistics(results):
-    """ Calculate mean and SEM for each compression level. """
+
+def clean_data(df):
+    df["CorrectPreTestBatch"] = pd.to_numeric(
+        df["CorrectPreTestBatch"], errors="coerce"
+    )
+    df = df.dropna(subset=["CorrectPreTestBatch"])
+    df = df[~df["Seed"].astype(str).str.contains("Seed")]
+    return df
+
+
+def calculate_statistics(df, is_sampled=True):
     final_results = {}
-    for compression, data in results.items():
-        if isinstance(data, dict):  # for sampled results which are grouped by seed
-            data = [np.mean(vals) for vals in data.values()]  # average over samples for each seed
-        # Calculate mean and SEM across data points
-        overall_mean = np.mean(data)
-        overall_sem = sem(data) if len(data) > 1 else 0
+
+    grouped = df.groupby("Compression")
+    for compression, group in grouped:
+        if is_sampled:
+            seed_means = []
+            seed_sems = []
+            for seed, seed_group in group.groupby("Seed"):
+                seed_data = seed_group["CorrectPreTestBatch"].dropna().values
+                if seed_data.size >= 2:  # Ensure there are at least two data points
+                    seed_mean = np.mean(seed_data)
+                    seed_sem = sem(seed_data)
+                    seed_means.append(seed_mean)
+                    seed_sems.append(seed_sem)
+                else:
+                    print(
+                        f"Insufficient data for SEM calculation for seed {seed} in compression {compression}"
+                    )
+
+            if seed_means:  # Check that there are means to calculate an overall mean
+                overall_mean = np.mean(seed_means)
+                if len(seed_sems) > 1:
+                    overall_sem = np.sqrt(np.sum(np.array(seed_sems) ** 2)) / len(
+                        seed_means
+                    )
+                else:
+                    overall_sem = (
+                        np.nan
+                    )  # Not enough SEM values to calculate an overall SEM
+            else:
+                overall_mean = np.nan
+                overall_sem = np.nan
+        else:
+            data = group["CorrectPreTestBatch"].dropna().values
+            overall_mean = np.mean(data)
+            overall_sem = (
+                sem(data) if data.size >= 2 else np.nan
+            )  # Ensure there are at least two data points
+
         final_results[compression] = (overall_mean, overall_sem)
+
     return final_results
 
-# Path to the directory containing all the .mat files
-directory_path = '/network/scratch/a/augustine.mavor-parker/MNIST_results/2024-07-29/'
 
-# Load the data
-sampled_results, mean_results = load_data(directory_path)
+# File paths for the sampled and mean CSV files
+sampled_csv = "sampled.csv"
+mean_csv = "mean.csv"
+
+# Load the data from CSV files
+sampled_df, mean_df = load_data_from_csv(sampled_csv, mean_csv)
+
+# Clean the data
+sampled_df = clean_data(sampled_df)
+mean_df = clean_data(mean_df)
 
 # Calculate statistics
-final_sampled_results = calculate_statistics({comp: seeds for comp, seeds in sampled_results.items()})
-final_mean_results = calculate_statistics(mean_results)
+final_sampled_results = calculate_statistics(sampled_df, is_sampled=True)
+final_mean_results = calculate_statistics(mean_df, is_sampled=False)
 
 # Output the results
 print("\nSampled Data Results:")
 for compression_level, stats in final_sampled_results.items():
-    print(f"Compression Level {compression_level} - Mean: {stats[0]:.4f}, SEM: {stats[1]:.4f}")
+    print(
+        f"Compression Level {compression_level} - Mean: {stats[0]:.4f}, SEM: {stats[1]:.4f}"
+    )
 
 print("\nMean Data Results:")
 for compression_level, stats in final_mean_results.items():
-    print(f"Compression Level {compression_level} - Mean: {stats[0]:.4f}, SEM: {stats[1]:.4f}")
+    print(
+        f"Compression Level {compression_level} - Mean: {stats[0]:.4f}, SEM: {stats[1]:.4f}"
+    )
+
+# Save the results to .npy files
+np.save("sampled_results.npy", final_sampled_results)  # Save sampled data results
+np.save("mean_results.npy", final_mean_results)  # Save mean data results
