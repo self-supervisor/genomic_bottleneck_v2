@@ -26,31 +26,6 @@ This is what worked on Elzar. It might be different for you depending on your CU
 
 ## Usage
 
-### Quick Start
+Instructions to reproduce the RL experiments are in the [RL directory](https://github.com/self-supervisor/genomic_bottleneck_v2/tree/main/RL). 
 
-Run a single example (approximately 20 minutes):
-```bash
-python training_torch.py --config-name=ant eval_population=False
-```
-
-To get phenotypic diversity plot:
-
-```bash
-python training_torch.py --config-name ant
-```
-
-### Reproducing Plots
-
-To sweep through different compressions and environments run:
-
-```bash
-qsub UGE_job.sh
-```
-
-You should get results like [this](https://wandb.ai/self-supervisor/brax-cshl/reports/Genomic-Bottleneck-v2-Nov-1st--Vmlldzo1ODQyMzA3?accessToken=wh7ltbcurtd2xd8nekl1udteia84p7xjjw8ytq5vj1t6bj8hwqjmth8ux1fpwwbh)
-
-Then edit the code in plot.py to go through the CSVs and plot them for the scatter plots.
-
-Code for Bayesian bottleneck layes was given to me by Divyansha.
-
-README generated with GPT-4.
+Instructions to reproduce the supervised learning experiments are in the [supervised_learning directory](https://github.com/self-supervisor/genomic_bottleneck_v2/tree/main/supervised_learning). 
